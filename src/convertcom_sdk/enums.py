@@ -27,3 +27,16 @@ class SegmentsKeys(str, Enum):
     CAMPAIGN = "campaign"
     VISITOR_TYPE = "visitorType"
     CUSTOM_SEGMENTS = "customSegments"
+
+
+class SystemEvents(str, Enum):
+    READY = "ready"
+    CONFIG_UPDATED = "config.updated"
+    API_QUEUE_RELEASED = "api.queue.released"
+    BUCKETING = "bucketing"
+    CONVERSION = "conversion"
+    SEGMENTS = "segments"
+    LOCATION_ACTIVATED = "location.activated"
+    LOCATION_DEACTIVATED = "location.deactivated"
+    AUDIENCES = "audiences"
+    DATA_STORE_QUEUE_RELEASED = "datastore.queue.released"
