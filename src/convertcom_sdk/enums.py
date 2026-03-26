@@ -8,3 +8,22 @@ class RuleError(str, Enum):
 
 class BucketingError(str, Enum):
     VARIAION_NOT_DECIDED = "convert.com_variation_not_decided"
+
+
+class FeatureStatus(str, Enum):
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+
+
+class VariationChangeType(str, Enum):
+    FULLSTACK_FEATURE = "fullStackFeature"
+
+
+class SegmentsKeys(str, Enum):
+    COUNTRY = "country"
+    BROWSER = "browser"
+    DEVICES = "devices"
+    SOURCE = "source"
+    CAMPAIGN = "campaign"
+    VISITOR_TYPE = "visitorType"
+    CUSTOM_SEGMENTS = "customSegments"
