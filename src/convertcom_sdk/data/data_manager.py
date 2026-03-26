@@ -18,12 +18,14 @@ class DataManager:
         bucketing_manager: BucketingManager,
         rule_manager: RuleManager,
         data_store_manager: DataStoreManager | None = None,
+        api_manager: Any | None = None,
     ) -> None:
         self._config = dict(config or {})
         self._data = self._config.get("data") or {}
         self._bucketing_manager = bucketing_manager
         self._rule_manager = rule_manager
         self._data_store_manager = data_store_manager
+        self._api_manager = api_manager
         self._environment = self._config.get("environment")
         self._account_id = self._data.get("account_id")
         self._project_id = (self._data.get("project") or {}).get("id")
@@ -32,6 +34,20 @@ class DataManager:
     @property
     def data(self) -> dict[str, Any]:
         return self._data
+
+    @data.setter
+    def data(self, value: Mapping[str, Any] | None) -> None:
+        if self.is_valid_config_data(value):
+            self._data = dict(value or {})
+            self._account_id = self._data.get("account_id")
+            self._project_id = (self._data.get("project") or {}).get("id")
+
+    @property
+    def data_store_manager(self) -> DataStoreManager | None:
+        return self._data_store_manager
+
+    def set_api_manager(self, api_manager: Any | None) -> None:
+        self._api_manager = api_manager
 
     def reset(self) -> None:
         self._bucketed_visitors = {}
@@ -273,6 +289,7 @@ class DataManager:
         update_visitor_properties: bool,
         experience: Mapping[str, Any],
         force_variation_id: str | None = None,
+        enable_tracking: bool = True,
     ) -> Any:
         variation = None
         variation_id = None
@@ -329,6 +346,18 @@ class DataManager:
                     visitor_id,
                     {"bucketing": {str(experience.get("id")): variation_id}},
                 )
+            if enable_tracking and self._api_manager:
+                self._api_manager.enqueue(
+                    visitor_id,
+                    {
+                        "eventType": "bucketing",
+                        "data": {
+                            "experienceId": str(experience.get("id")),
+                            "variationId": str(variation_id),
+                        },
+                    },
+                    (self.get_data(visitor_id) or {}).get("segments"),
+                )
             variation = self._retrieve_variation(str(experience.get("id")), str(variation_id))
 
         if not variation:
@@ -360,6 +389,7 @@ class DataManager:
             bool(attributes.get("updateVisitorProperties")),
             experience,
             attributes.get("forceVariationId"),
+            bool(attributes.get("enableTracking", True)),
         )
 
     def get_bucketing(
@@ -377,3 +407,62 @@ class DataManager:
         attributes: Mapping[str, Any] | None = None,
     ) -> Any:
         return self._get_bucketing_by_field(visitor_id, entity_id, "id", attributes)
+
+    def convert(
+        self,
+        visitor_id: str,
+        goal_id: str,
+        goal_rule: Mapping[str, Any] | None = None,
+        goal_data: list[Mapping[str, Any]] | None = None,
+        segments: Mapping[str, Any] | None = None,
+        conversion_setting: Mapping[str, Any] | None = None,
+    ) -> RuleError | bool | None:
+        goal = self.get_entity(goal_id, "goals") or self.get_entity_by_id(goal_id, "goals")
+        if not goal or not goal.get("id"):
+            return None
+
+        if goal_rule:
+            goal_rules = goal.get("rules")
+            if not goal_rules:
+                return None
+            rule_matched = self._rule_manager.is_rule_matched(
+                goal_rule,
+                goal_rules,
+                f"ConfigGoal #{goal_id}",
+            )
+            if isinstance(rule_matched, RuleError):
+                return rule_matched
+            if not rule_matched:
+                return None
+
+        store_data = self.get_data(visitor_id) or {}
+        bucketing_data = store_data.get("bucketing")
+        goals = dict(store_data.get("goals") or {})
+        already_triggered = bool(goals.get(str(goal_id)))
+        force_multiple = bool(
+            (conversion_setting or {}).get("force_multiple_transactions")
+            or (conversion_setting or {}).get("forceMultipleTransactions")
+        )
+        if already_triggered and not force_multiple:
+            return None
+
+        self.put_data(visitor_id, {"goals": {str(goal_id): True}})
+
+        def enqueue_conversion(payload: dict[str, Any]) -> None:
+            if not self._api_manager:
+                return
+            if bucketing_data:
+                payload["bucketingData"] = bucketing_data
+            self._api_manager.enqueue(
+                visitor_id,
+                {"eventType": "conversion", "data": payload},
+                segments,
+            )
+
+        if not already_triggered:
+            enqueue_conversion({"goalId": str(goal.get("id"))})
+
+        if goal_data and (not already_triggered or force_multiple):
+            enqueue_conversion({"goalId": str(goal.get("id")), "goalData": goal_data})
+
+        return True

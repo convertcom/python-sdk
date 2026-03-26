@@ -31,3 +31,6 @@ class DataStoreManager:
             and hasattr(data_store, "set")
             and callable(data_store.set)
         )
+
+    def release_queue(self, reason: str | None = None) -> None:
+        del reason
