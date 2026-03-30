@@ -40,3 +40,13 @@ class SystemEvents(str, Enum):
     LOCATION_DEACTIVATED = "location.deactivated"
     AUDIENCES = "audiences"
     DATA_STORE_QUEUE_RELEASED = "datastore.queue.released"
+
+
+class EntityType(str, Enum):
+    AUDIENCE = "audience"
+    LOCATION = "location"
+    SEGMENT = "segment"
+    FEATURE = "feature"
+    GOAL = "goal"
+    EXPERIENCE = "experience"
+    VARIATION = "variation"

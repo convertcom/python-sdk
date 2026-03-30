@@ -11,15 +11,20 @@ class EventManager:
         self._deferred: dict[str, dict[str, Any]] = {}
         self._mapper = config.get("mapper") or (lambda value: value)
 
+    def _event_key(self, event: Any) -> str:
+        return getattr(event, "value", event)
+
     def on(self, event: str, fn: Callable[[Any, Any], None]) -> None:
-        self._listeners.setdefault(str(event), []).append(fn)
-        if str(event) in self._deferred:
-            deferred = self._deferred[str(event)]
-            self.fire(str(event), deferred.get("args"), deferred.get("err"))
+        event_key = self._event_key(event)
+        self._listeners.setdefault(event_key, []).append(fn)
+        if event_key in self._deferred:
+            deferred = self._deferred[event_key]
+            self.fire(event_key, deferred.get("args"), deferred.get("err"))
 
     def remove_listeners(self, event: str) -> None:
-        self._listeners.pop(str(event), None)
-        self._deferred.pop(str(event), None)
+        event_key = self._event_key(event)
+        self._listeners.pop(event_key, None)
+        self._deferred.pop(event_key, None)
 
     def fire(
         self,
@@ -28,8 +33,9 @@ class EventManager:
         err: Any = None,
         deferred: bool = False,
     ) -> None:
-        listeners = list(self._listeners.get(str(event), []))
+        event_key = self._event_key(event)
+        listeners = list(self._listeners.get(event_key, []))
         for fn in listeners:
             fn(self._mapper(args), err)
-        if deferred and str(event) not in self._deferred:
-            self._deferred[str(event)] = {"args": args, "err": err}
+        if deferred and event_key not in self._deferred:
+            self._deferred[event_key] = {"args": args, "err": err}
