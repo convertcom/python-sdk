@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, IntEnum
 
 
 class RuleError(str, Enum):
@@ -50,3 +50,21 @@ class EntityType(str, Enum):
     GOAL = "goal"
     EXPERIENCE = "experience"
     VARIATION = "variation"
+
+
+class LogLevel(IntEnum):
+    TRACE = 0
+    DEBUG = 1
+    INFO = 2
+    WARN = 3
+    ERROR = 4
+    SILENT = 5
+
+
+class LogMethod(str, Enum):
+    LOG = "log"
+    TRACE = "trace"
+    DEBUG = "debug"
+    INFO = "info"
+    WARN = "warn"
+    ERROR = "error"

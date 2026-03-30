@@ -21,6 +21,7 @@ class DataManager:
         rule_manager: RuleManager,
         data_store_manager: DataStoreManager | None = None,
         api_manager: Any | None = None,
+        async_storage: bool = True,
     ) -> None:
         self._config = dict(config or {})
         self._lock = threading.RLock()
@@ -29,6 +30,7 @@ class DataManager:
         self._rule_manager = rule_manager
         self._data_store_manager = data_store_manager
         self._api_manager = api_manager
+        self._async_storage = async_storage
         self._environment = self._config.get("environment")
         self._account_id = self._data.get("account_id")
         self._project_id = (self._data.get("project") or {}).get("id")
@@ -86,13 +88,32 @@ class DataManager:
         store_key = self.get_store_key(visitor_id)
         current = self.get_data(visitor_id) or {}
         updated = object_deep_merge(current, new_data)
+        if updated == current:
+            return
         with self._lock:
             self._bucketed_visitors[store_key] = updated
             self._bucketed_visitors.move_to_end(store_key)
             while len(self._bucketed_visitors) > self._local_store_limit:
                 self._bucketed_visitors.popitem(last=False)
         if self._data_store_manager:
-            self._data_store_manager.set(store_key, updated)
+            stored_segments = dict(current.get("segments") or {})
+            data = {key: value for key, value in current.items() if key != "segments"}
+            report_segments = self.filter_report_segments(stored_segments).get("segments") or {}
+            new_segments = self.filter_report_segments(new_data.get("segments") or {}).get(
+                "segments"
+            )
+            stored_value = (
+                object_deep_merge(
+                    data,
+                    {"segments": {**report_segments, **new_segments}},
+                )
+                if new_segments
+                else updated
+            )
+            if self._async_storage and hasattr(self._data_store_manager, "enqueue"):
+                self._data_store_manager.enqueue(store_key, stored_value)
+            else:
+                self._data_store_manager.set(store_key, stored_value)
 
     def filter_report_segments(
         self, visitor_properties: Mapping[str, Any] | None
