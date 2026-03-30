@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 from convertcom_sdk import ConvertSDK, SystemEvents
 from convertcom_sdk.utils import HttpResponse
 
@@ -16,7 +19,7 @@ def test_convert_sdk_creates_context_from_static_config(config):
 def test_convert_sdk_fetches_config_from_sdk_key():
     requests = []
 
-    def request_sender(*, method, base_url, route, headers, data):
+    def request_sender(*, method, base_url, route, headers, data, **kwargs):
         requests.append((method, base_url, route, headers, data))
         return HttpResponse(
             status=200,
@@ -44,3 +47,33 @@ def test_core_fires_ready_event_for_static_config(config):
 
     assert received == [(None, None)]
     assert sdk.on_ready() is None
+
+
+def test_core_auto_refreshes_and_can_be_closed():
+    requests = []
+    refreshed = threading.Event()
+
+    def request_sender(*, method, base_url, route, headers, data, **kwargs):
+        requests.append((method, base_url, route, headers, data, kwargs))
+        if len(requests) >= 2:
+            refreshed.set()
+        return HttpResponse(
+            status=200,
+            data={"account_id": "100", "project": {"id": "200"}, "features": []},
+            headers={"Content-Type": "application/json"},
+        )
+
+    sdk = ConvertSDK(
+        {
+            "sdkKey": "100/200",
+            "api": {"endpoint": {"config": "https://cdn.example.com"}},
+            "dataRefreshInterval": 50,
+        },
+        request_sender=request_sender,
+    )
+
+    assert refreshed.wait(1)
+    sdk.close()
+    count_after_close = len(requests)
+    time.sleep(0.12)
+    assert len(requests) == count_after_close

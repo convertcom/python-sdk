@@ -1,4 +1,5 @@
 from convertcom_sdk.enums import BucketingError
+from convertcom_sdk import BucketingManager, DataManager, RuleManager
 
 
 VISITOR_ID = "XXX"
@@ -69,3 +70,43 @@ def test_bucketing_error_when_variations_missing(managers):
         },
     )
     assert variation == BucketingError.VARIAION_NOT_DECIDED
+
+
+def test_data_manager_eviction_respects_cache_limit(config):
+    hardened_config = {
+        **config,
+        "cache": {"max_entries": 1},
+    }
+    data_manager = DataManager(
+        hardened_config,
+        bucketing_manager=BucketingManager(hardened_config),
+        rule_manager=RuleManager(hardened_config),
+    )
+
+    data_manager.put_data("visitor-1", {"segments": {"country": "US"}})
+    data_manager.put_data("visitor-2", {"segments": {"country": "GB"}})
+
+    assert data_manager.get_data("visitor-1") is None
+    assert data_manager.get_data("visitor-2") == {"segments": {"country": "GB"}}
+
+
+def test_data_store_release_queue_passthrough():
+    released = []
+
+    class FakeDataStore:
+        def get(self, key):  # noqa: ARG002
+            return None
+
+        def set(self, key, data):  # noqa: ARG002
+            return None
+
+        def release_queue(self, reason=None):
+            released.append(reason)
+
+    from convertcom_sdk.data import DataStoreManager
+
+    manager = DataStoreManager(data_store=FakeDataStore())
+
+    manager.release_queue("manual")
+
+    assert released == ["manual"]

@@ -5,7 +5,7 @@ from convertcom_sdk.utils import HttpResponse
 
 
 def make_request_sender(requests):
-    def sender(*, method, base_url, route, headers, data):
+    def sender(*, method, base_url, route, headers, data, **kwargs):
         requests.append(
             {
                 "method": method,
@@ -13,6 +13,7 @@ def make_request_sender(requests):
                 "route": route,
                 "headers": headers,
                 "data": data,
+                "kwargs": kwargs,
             }
         )
         return HttpResponse(

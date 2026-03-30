@@ -17,6 +17,7 @@ class RecordedRequest:
     route: str
     headers: dict[str, str]
     body: Any
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -34,7 +35,7 @@ def request_state():
 
 @pytest.fixture
 def request_sender(request_state):
-    def sender(*, method, base_url, route, headers, data):
+    def sender(*, method, base_url, route, headers, data, **kwargs):
         request_state.requests.append(
             RecordedRequest(
                 method=method,
@@ -42,6 +43,7 @@ def request_sender(request_state):
                 route=route,
                 headers=dict(headers),
                 body=data,
+                options=dict(kwargs),
             )
         )
         if request_state.error:
@@ -86,6 +88,50 @@ def test_get_config_fetches_sdk_key_config(request_state, request_sender):
     assert data == {"account_id": "100", "project": {"id": "200"}}
     assert request_state.requests[0].base_url == "https://cdn.example.com"
     assert request_state.requests[0].route == "/config/100/200?environment=staging"
+
+
+def test_get_config_formats_low_cache_query(request_state, request_sender):
+    request_state.response_body = {"account_id": "100", "project": {"id": "200"}}
+    api_manager = ApiManager(
+        {
+            "sdkKey": "100/200",
+            "environment": "staging",
+            "network": {"cacheLevel": "low"},
+            "api": {"endpoint": {"config": "https://cdn.example.com"}},
+        },
+        request_sender=request_sender,
+    )
+
+    api_manager.get_config()
+
+    assert (
+        request_state.requests[0].route
+        == "/config/100/200?environment=staging&_conv_low_cache=1"
+    )
+
+
+def test_request_uses_network_timeout_and_retries(request_state, request_sender):
+    api_manager = ApiManager(
+        {
+            "sdkKey": "100/200",
+            "api": {"endpoint": {"config": "https://cdn.example.com"}},
+            "network": {
+                "requestTimeout": 3.5,
+                "configRetries": 4,
+                "trackRetries": 2,
+                "retryBackoff": 0.25,
+            },
+        },
+        request_sender=request_sender,
+    )
+
+    api_manager.get_config()
+
+    recorded = request_state.requests[0]
+    assert recorded.route == "/config/100/200"
+    assert recorded.options["timeout"] == 3.5
+    assert recorded.options["retries"] == 4
+    assert recorded.options["retry_backoff"] == 0.25
 
 
 def test_release_queue_groups_events_and_fires_size_event(request_state, request_sender):
