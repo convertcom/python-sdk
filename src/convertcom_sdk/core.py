@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -28,6 +29,8 @@ class Core:
         self._feature_manager = feature_manager
         self._segments_manager = segments_manager
         self._api_manager = api_manager
+        self._refresh_lock = threading.RLock()
+        self._refresh_timer: threading.Timer | None = None
         self.initialize(self._config)
 
     def initialize(self, config: Mapping[str, Any] | None) -> None:
@@ -55,27 +58,50 @@ class Core:
             )
 
     def refresh_config(self, *, initial: bool = False) -> dict[str, Any]:
-        data = self._api_manager.get_config()
-        if data.get("error"):
+        with self._refresh_lock:
+            data = self._api_manager.get_config()
+            if data.get("error"):
+                self.data = data
+                self._data_manager.data = data
+                return data
+            had_data = bool(self._data_manager.data)
             self.data = data
             self._data_manager.data = data
+            self._api_manager.set_data(data)
+            if not had_data and initial:
+                self._initialized = True
+                self._event_manager.fire(SystemEvents.READY, None, None, True)
+            elif had_data:
+                self._event_manager.fire(SystemEvents.CONFIG_UPDATED, None, None, True)
+            else:
+                self._initialized = True
+                self._event_manager.fire(SystemEvents.READY, None, None, True)
+            self._schedule_refresh()
             return data
-        had_data = bool(self._data_manager.data)
-        self.data = data
-        self._data_manager.data = data
-        self._api_manager.set_data(data)
-        if not had_data and initial:
-            self._initialized = True
-            self._event_manager.fire(SystemEvents.READY, None, None, True)
-        elif had_data:
-            self._event_manager.fire(SystemEvents.CONFIG_UPDATED, None, None, True)
-        else:
-            self._initialized = True
-            self._event_manager.fire(SystemEvents.READY, None, None, True)
-        return data
 
     def refreshConfig(self) -> dict[str, Any]:
         return self.refresh_config()
+
+    def _schedule_refresh(self) -> None:
+        self._stop_refresh_timer()
+        if not self._config.get("sdkKey"):
+            return
+        interval_ms = int(self._config.get("dataRefreshInterval") or 0)
+        if interval_ms <= 0:
+            return
+        timer = threading.Timer(
+            interval_ms / 1000.0,
+            lambda: self.refresh_config(initial=False),
+        )
+        timer.daemon = True
+        self._refresh_timer = timer
+        timer.start()
+
+    def _stop_refresh_timer(self) -> None:
+        timer = self._refresh_timer
+        self._refresh_timer = None
+        if timer:
+            timer.cancel()
 
     def create_context(
         self,
@@ -115,3 +141,8 @@ class Core:
 
     def onReady(self) -> None:
         return self.on_ready()
+
+    def close(self) -> None:
+        self._stop_refresh_timer()
+        if hasattr(self._api_manager, "close"):
+            self._api_manager.close()

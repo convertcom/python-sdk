@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from collections.abc import Mapping
 from typing import Any
 
@@ -21,6 +23,7 @@ class DataManager:
         api_manager: Any | None = None,
     ) -> None:
         self._config = dict(config or {})
+        self._lock = threading.RLock()
         self._data = self._config.get("data") or {}
         self._bucketing_manager = bucketing_manager
         self._rule_manager = rule_manager
@@ -29,7 +32,10 @@ class DataManager:
         self._environment = self._config.get("environment")
         self._account_id = self._data.get("account_id")
         self._project_id = (self._data.get("project") or {}).get("id")
-        self._bucketed_visitors: dict[str, dict[str, Any]] = {}
+        self._local_store_limit = int(
+            ((self._config.get("cache") or {}).get("max_entries")) or 10000
+        )
+        self._bucketed_visitors: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
     @property
     def data(self) -> dict[str, Any]:
@@ -50,7 +56,8 @@ class DataManager:
         self._api_manager = api_manager
 
     def reset(self) -> None:
-        self._bucketed_visitors = {}
+        with self._lock:
+            self._bucketed_visitors = OrderedDict()
 
     def is_valid_config_data(self, data: Mapping[str, Any] | None) -> bool:
         if not object_not_empty(data):
@@ -65,7 +72,10 @@ class DataManager:
 
     def get_data(self, visitor_id: str) -> dict[str, Any] | None:
         store_key = self.get_store_key(visitor_id)
-        memory_data = self._bucketed_visitors.get(store_key) or {}
+        with self._lock:
+            memory_data = self._bucketed_visitors.get(store_key) or {}
+            if store_key in self._bucketed_visitors:
+                self._bucketed_visitors.move_to_end(store_key)
         if self._data_store_manager:
             stored = self._data_store_manager.get(store_key) or {}
             return object_deep_merge(memory_data, stored)
@@ -76,7 +86,11 @@ class DataManager:
         store_key = self.get_store_key(visitor_id)
         current = self.get_data(visitor_id) or {}
         updated = object_deep_merge(current, new_data)
-        self._bucketed_visitors[store_key] = updated
+        with self._lock:
+            self._bucketed_visitors[store_key] = updated
+            self._bucketed_visitors.move_to_end(store_key)
+            while len(self._bucketed_visitors) > self._local_store_limit:
+                self._bucketed_visitors.popitem(last=False)
         if self._data_store_manager:
             self._data_store_manager.set(store_key, updated)
 

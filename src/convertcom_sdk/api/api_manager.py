@@ -96,6 +96,10 @@ class ApiManager:
         self._tracking_enabled = bool(network.get("tracking"))
         self._tracking_source = network.get("source") or "python-sdk"
         self._cache_level = network.get("cacheLevel")
+        self._request_timeout = float(network.get("requestTimeout") or 10.0)
+        self._config_retries = int(network.get("configRetries") or 0)
+        self._track_retries = int(network.get("trackRetries") or 0)
+        self._retry_backoff = float(network.get("retryBackoff") or 0.0)
         self._requests_queue = VisitorsQueue()
         self._requests_queue_timer: threading.Timer | None = None
 
@@ -110,17 +114,27 @@ class ApiManager:
         path: Mapping[str, str],
         data: Mapping[str, Any] | None = None,
         headers: Mapping[str, Any] | None = None,
+        *,
+        retries: int | None = None,
     ) -> HttpResponse:
         request_headers = {
             **self._default_headers,
             **dict(headers or {}),
         }
+        resolved_retries = retries
+        if resolved_retries is None:
+            resolved_retries = (
+                self._config_retries if method.lower() == "get" else self._track_retries
+            )
         return self._request_sender(
             method=method,
             base_url=path["base"],
             route=path["route"],
             headers=request_headers,
             data=dict(data or {}),
+            timeout=self._request_timeout,
+            retries=resolved_retries,
+            retry_backoff=self._retry_backoff,
         )
 
     def enqueue(
@@ -224,12 +238,16 @@ class ApiManager:
         if self._environment:
             query += f"environment={self._environment}"
         if self._cache_level == "low":
-            query += "_conv_low_cache=1"
+            query += ("&" if self._environment else "") + "_conv_low_cache=1"
         response = self.request(
             "get",
             {
                 "base": self._config_endpoint,
                 "route": f"/config/{self._sdk_key}{query}",
             },
+            retries=self._config_retries,
         )
         return dict(response.data or {})
+
+    def close(self) -> None:
+        self.stop_queue()
