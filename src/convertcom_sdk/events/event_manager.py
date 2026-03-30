@@ -5,11 +5,17 @@ from typing import Any
 
 
 class EventManager:
-    def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        config: Mapping[str, Any] | None = None,
+        *,
+        logger_manager: Any | None = None,
+    ) -> None:
         config = dict(config or {})
         self._listeners: dict[str, list[Callable[[Any, Any], None]]] = {}
         self._deferred: dict[str, dict[str, Any]] = {}
         self._mapper = config.get("mapper") or (lambda value: value)
+        self._logger_manager = logger_manager
 
     def _event_key(self, event: Any) -> str:
         return getattr(event, "value", event)
@@ -36,6 +42,10 @@ class EventManager:
         event_key = self._event_key(event)
         listeners = list(self._listeners.get(event_key, []))
         for fn in listeners:
-            fn(self._mapper(args), err)
+            try:
+                fn(self._mapper(args), err)
+            except Exception as error:
+                if self._logger_manager:
+                    self._logger_manager.error("EventManager.fire()", error)
         if deferred and event_key not in self._deferred:
             self._deferred[event_key] = {"args": args, "err": err}

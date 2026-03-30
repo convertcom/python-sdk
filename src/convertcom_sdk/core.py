@@ -144,5 +144,9 @@ class Core:
 
     def close(self) -> None:
         self._stop_refresh_timer()
+        if self._data_manager.data_store_manager and hasattr(
+            self._data_manager.data_store_manager, "close"
+        ):
+            self._data_manager.data_store_manager.close()
         if hasattr(self._api_manager, "close"):
             self._api_manager.close()

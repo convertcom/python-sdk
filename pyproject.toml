@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "convertcom-python-sdk"
 version = "0.1.0"
-description = "Python port of the Convert Fullstack SDK deterministic core"
+description = "Python port of the Convert Fullstack SDK"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

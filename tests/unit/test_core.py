@@ -77,3 +77,27 @@ def test_core_auto_refreshes_and_can_be_closed():
     count_after_close = len(requests)
     time.sleep(0.12)
     assert len(requests) == count_after_close
+
+
+def test_core_close_stops_datastore_queue_timer(config):
+    class FakeDataStore:
+        def get(self, key):
+            return None
+
+        def set(self, key, value):
+            return None
+
+    sdk = ConvertSDK(
+        {
+            **config,
+            "dataStore": FakeDataStore(),
+            "events": {"batch_size": 10, "release_interval": 500},
+        }
+    )
+    context = sdk.create_context("visitor-1")
+
+    context.update_visitor_properties("visitor-1", {"country": "US"})
+
+    assert sdk._data_manager.data_store_manager._requests_queue_timer is not None
+    sdk.close()
+    assert sdk._data_manager.data_store_manager._requests_queue_timer is None

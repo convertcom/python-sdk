@@ -1,8 +1,26 @@
 from convertcom_sdk.enums import BucketingError
-from convertcom_sdk import BucketingManager, DataManager, RuleManager
+from convertcom_sdk import (
+    BucketingManager,
+    DataManager,
+    DataStoreManager,
+    RuleManager,
+)
 
 
 VISITOR_ID = "XXX"
+
+
+class FakeDataStore:
+    def __init__(self) -> None:
+        self.data = {}
+        self.set_calls = []
+
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, value):
+        self.data[key] = value
+        self.set_calls.append((key, value))
 
 
 def test_validates_fixture_config(managers, config):
@@ -90,23 +108,30 @@ def test_data_manager_eviction_respects_cache_limit(config):
     assert data_manager.get_data("visitor-2") == {"segments": {"country": "GB"}}
 
 
-def test_data_store_release_queue_passthrough():
-    released = []
+def test_put_data_enqueues_filtered_segments_for_datastore(config):
+    store = FakeDataStore()
+    data_store_manager = DataStoreManager(
+        {"events": {"batch_size": 10, "release_interval": 50}},
+        data_store=store,
+    )
+    data_manager = DataManager(
+        config,
+        bucketing_manager=BucketingManager(config),
+        rule_manager=RuleManager(config),
+        data_store_manager=data_store_manager,
+    )
 
-    class FakeDataStore:
-        def get(self, key):  # noqa: ARG002
-            return None
+    data_manager.put_data(
+        "visitor-1",
+        {"segments": {"country": "US", "weather": "rainy"}},
+    )
 
-        def set(self, key, data):  # noqa: ARG002
-            return None
+    assert store.set_calls == []
+    assert data_manager.get_data("visitor-1") == {
+        "segments": {"country": "US", "weather": "rainy"}
+    }
 
-        def release_queue(self, reason=None):
-            released.append(reason)
+    data_store_manager.release_queue("manual")
 
-    from convertcom_sdk.data import DataStoreManager
-
-    manager = DataStoreManager(data_store=FakeDataStore())
-
-    manager.release_queue("manual")
-
-    assert released == ["manual"]
+    assert len(store.set_calls) == 1
+    assert store.set_calls[0][1] == {"segments": {"country": "US"}}
