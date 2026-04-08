@@ -23,3 +23,36 @@ UV_CACHE_DIR=/tmp/uv-cache uv build
 ```python
 from convert_sdk import Context, Core, __version__
 ```
+
+### Initialization
+
+Initialize with direct config data:
+
+```python
+from convert_sdk import Core, SDKConfig
+
+project_config = {
+    "account_id": "1001",
+    "project": {"id": "2002", "name": "Demo"},
+}
+
+core = Core(SDKConfig(config_data=project_config))
+assert core.is_ready
+```
+
+Initialize with an SDK key:
+
+```python
+from convert_sdk import Core, SDKConfig, TransportConfig
+
+core = Core(
+    SDKConfig(
+        sdk_key="1001/2002",
+        environment="staging",
+        transport=TransportConfig(
+            config_endpoint="https://cdn-4.convertexperiments.com/api/v1",
+        ),
+    )
+)
+assert core.is_ready
+```
