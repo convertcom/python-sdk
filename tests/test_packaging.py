@@ -23,4 +23,5 @@ def test_pyproject_freezes_convert_sdk_package_boundary() -> None:
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
     assert 'packages = ["src/convert_sdk"]' in pyproject
+    assert '"examples/**/*.py"' in pyproject
     assert '"src/convert_sdk/py.typed" = "convert_sdk/py.typed"' in pyproject
