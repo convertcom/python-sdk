@@ -1,6 +1,7 @@
 from importlib import resources
 
 from convert_sdk import (
+    ConversionDataError,
     Context,
     ConversionEvent,
     ConversionResult,
@@ -23,6 +24,7 @@ def test_public_import_boundary_is_stable() -> None:
     assert TransportConfig.__module__ == "convert_sdk.config"
     assert ConversionEvent.__module__ == "convert_sdk.domain.results"
     assert ConversionResult.__module__ == "convert_sdk.domain.results"
+    assert ConversionDataError.__module__ == "convert_sdk.errors"
     assert ExperienceResult.__module__ == "convert_sdk.domain.results"
     assert FeatureResult.__module__ == "convert_sdk.domain.results"
     assert FeatureStatus.__module__ == "convert_sdk.domain.results"

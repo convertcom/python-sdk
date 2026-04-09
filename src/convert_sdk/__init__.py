@@ -13,6 +13,7 @@ from .domain.results import (
 from .errors import (
     ConfigLoadError,
     ConfigValidationError,
+    ConversionDataError,
     GoalNotFoundError,
     InitializationError,
     TrackingError,
@@ -22,6 +23,7 @@ from .version import __version__
 __all__ = [
     "ConfigLoadError",
     "ConfigValidationError",
+    "ConversionDataError",
     "Context",
     "Core",
     "ConversionEvent",

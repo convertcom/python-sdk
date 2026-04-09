@@ -11,6 +11,8 @@ from .config_snapshot import freeze_mapping
 
 
 EMPTY_VARIABLES = MappingProxyType({})
+EMPTY_CONVERSION_DATA = MappingProxyType({})
+EMPTY_BUCKETING_DATA = MappingProxyType({})
 
 
 def freeze_variables(variables: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -19,6 +21,26 @@ def freeze_variables(variables: Mapping[str, Any] | None) -> Mapping[str, Any]:
     if not variables:
         return EMPTY_VARIABLES
     return freeze_mapping(variables)
+
+
+def freeze_conversion_data(
+    conversion_data: Mapping[str, Any] | None,
+) -> Mapping[str, Any]:
+    """Freeze conversion data into an immutable mapping."""
+
+    if not conversion_data:
+        return EMPTY_CONVERSION_DATA
+    return freeze_mapping(conversion_data)
+
+
+def freeze_bucketing_data(
+    bucketing_data: Mapping[str, str] | None,
+) -> Mapping[str, str]:
+    """Freeze bucketing attribution data into an immutable mapping."""
+
+    if not bucketing_data:
+        return EMPTY_BUCKETING_DATA
+    return MappingProxyType({str(key): str(value) for key, value in bucketing_data.items()})
 
 
 class FeatureStatus(str, Enum):
@@ -67,6 +89,8 @@ class ConversionEvent:
     goal_name: str | None = None
     account_id: str | None = None
     project_id: str | None = None
+    conversion_data: Mapping[str, Any] = EMPTY_CONVERSION_DATA
+    bucketing_data: Mapping[str, str] = EMPTY_BUCKETING_DATA
     event_type: str = "conversion"
 
 

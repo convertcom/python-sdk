@@ -128,7 +128,15 @@ class Context:
             type_cast=type_cast,
         )
 
-    def track_conversion(self, goal_key: str) -> ConversionResult:
+    def track_conversion(
+        self,
+        goal_key: str,
+        *,
+        conversion_data: Optional[Mapping[str, Any]] = None,
+        visitor_attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+        environment: Optional[str] = None,
+    ) -> ConversionResult:
         """Create a typed conversion event for the current visitor context."""
 
         if not isinstance(goal_key, str) or not goal_key.strip():
@@ -138,6 +146,10 @@ class Context:
             self._snapshot,
             visitor_id=self.visitor_id,
             goal_key=goal_key,
+            conversion_data=conversion_data,
+            visitor_attributes=self._resolve_visitor_attributes(visitor_attributes),
+            location_attributes=self._resolve_location_attributes(location_attributes),
+            environment=environment or self._default_environment,
         )
 
     def _resolve_location_attributes(
