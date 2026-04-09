@@ -6,9 +6,11 @@ from typing import Any, Mapping, Optional
 
 from .domain.config_snapshot import ConfigSnapshot
 from .domain.context_state import ContextState
-from .domain.results import ExperienceResult, FeatureResult
+from .domain.results import ConversionResult, ExperienceResult, FeatureResult
 from .evaluation.experiences import evaluate_experience, evaluate_experiences
 from .evaluation.features import evaluate_feature, evaluate_features
+from .tracking.conversions import track_conversion as create_conversion_result
+
 
 class Context:
     """Visitor-scoped SDK state that later evaluation stories will consume."""
@@ -124,6 +126,18 @@ class Context:
             location_attributes=self._resolve_location_attributes(location_attributes),
             environment=environment or self._default_environment,
             type_cast=type_cast,
+        )
+
+    def track_conversion(self, goal_key: str) -> ConversionResult:
+        """Create a typed conversion event for the current visitor context."""
+
+        if not isinstance(goal_key, str) or not goal_key.strip():
+            raise ValueError("goal_key is required")
+
+        return create_conversion_result(
+            self._snapshot,
+            visitor_id=self.visitor_id,
+            goal_key=goal_key,
         )
 
     def _resolve_location_attributes(

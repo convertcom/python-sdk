@@ -1,4 +1,4 @@
-"""Typed public evaluation results."""
+"""Typed public SDK result models."""
 
 from __future__ import annotations
 
@@ -56,3 +56,22 @@ class FeatureResult:
     variation_id: str | None = None
     variation_key: str | None = None
 
+
+@dataclass(frozen=True)
+class ConversionEvent:
+    """Typed conversion event created from a visitor context."""
+
+    visitor_id: str
+    goal_id: str
+    goal_key: str
+    goal_name: str | None = None
+    account_id: str | None = None
+    project_id: str | None = None
+    event_type: str = "conversion"
+
+
+@dataclass(frozen=True)
+class ConversionResult:
+    """Typed outcome for a successfully created conversion event."""
+
+    event: ConversionEvent

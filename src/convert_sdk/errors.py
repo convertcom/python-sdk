@@ -15,3 +15,11 @@ class ConfigValidationError(InitializationError):
 
 class ConfigLoadError(InitializationError):
     """Raised when remote configuration loading fails."""
+
+
+class TrackingError(ConvertSDKError):
+    """Base error for conversion-tracking failures."""
+
+
+class GoalNotFoundError(TrackingError):
+    """Raised when a conversion references a goal missing from the config."""
