@@ -12,6 +12,7 @@ from .domain.config_snapshot import ConfigSnapshot
 from .domain.context_state import ContextState
 from .errors import InitializationError
 from .ports.transport import Transport
+from .tracking.queue import TrackingQueue
 
 class Core:
     """Stable root export for SDK initialization and config access."""
@@ -23,13 +24,23 @@ class Core:
     ) -> None:
         self._config = config
         self._snapshot: Optional[ConfigSnapshot] = None
-        self._transport = transport
+        self._transport = transport or HttpxTransport()
+        self._tracking_queue: Optional[TrackingQueue] = None
         self._initialize()
 
     def _initialize(self) -> None:
         self._snapshot = load_config_snapshot(
             self._config,
-            transport=self._transport or HttpxTransport(),
+            transport=self._transport,
+        )
+        self._tracking_queue = TrackingQueue(
+            transport=self._transport,
+            transport_config=self._config.transport,
+            tracking_config=self._config.tracking,
+            sdk_key=self._config.sdk_key,
+            sdk_key_secret=self._config.sdk_key_secret,
+            account_id=self._snapshot.account_id,
+            project_id=self._snapshot.project_id,
         )
 
     @property
@@ -67,7 +78,7 @@ class Core:
 
         if not isinstance(visitor_id, str) or not visitor_id.strip():
             raise InitializationError("visitor_id is required to create a Context")
-        if self._snapshot is None:
+        if self._snapshot is None or self._tracking_queue is None:
             raise InitializationError("Core is not ready")
 
         try:
@@ -81,6 +92,7 @@ class Core:
         return Context(
             snapshot=self._snapshot,
             state=state,
+            tracking_queue=self._tracking_queue,
             default_environment=self._config.environment,
         )
 

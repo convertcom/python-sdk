@@ -96,6 +96,35 @@ class ConversionEvent:
 
 @dataclass(frozen=True)
 class ConversionResult:
-    """Typed outcome for a successfully created conversion event."""
+    """Typed outcome for queued conversion events."""
 
-    event: ConversionEvent
+    events: tuple[ConversionEvent, ...] = ()
+    duplicate_prevented: bool = False
+    queued_event_count: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "events", tuple(self.events))
+        if self.queued_event_count == 0 and self.events:
+            object.__setattr__(self, "queued_event_count", len(self.events))
+
+    @property
+    def event(self) -> ConversionEvent | None:
+        """Return the most useful event for callers expecting a single result."""
+
+        if not self.events:
+            return None
+        for event in reversed(self.events):
+            if event.conversion_data:
+                return event
+        return self.events[0]
+
+
+@dataclass(frozen=True)
+class TrackingFlushResult:
+    """Typed outcome for explicit tracking queue release."""
+
+    attempted: bool
+    delivered_event_count: int
+    delivered_batch_count: int
+    remaining_event_count: int
+    reason: str | None = None

@@ -21,7 +21,7 @@ def _optional_text(value: object) -> str | None:
     return str(value)
 
 
-def _resolve_goal(
+def resolve_goal(
     snapshot: ConfigSnapshot,
     goal_key: str,
 ) -> Mapping[str, object]:
@@ -54,7 +54,7 @@ def _normalize_conversion_value(value: Any) -> Any:
     )
 
 
-def _normalize_conversion_data(
+def normalize_conversion_data(
     conversion_data: Optional[Mapping[str, Any]],
 ) -> Mapping[str, Any]:
     if conversion_data is None:
@@ -91,6 +91,77 @@ def _build_bucketing_data(
     )
 
 
+def _build_event(
+    snapshot: ConfigSnapshot,
+    *,
+    visitor_id: str,
+    goal: Mapping[str, object],
+    goal_key: str,
+    conversion_data: Mapping[str, Any],
+    bucketing_data: Mapping[str, str],
+) -> ConversionEvent:
+    return ConversionEvent(
+        visitor_id=visitor_id,
+        goal_id=str(goal.get("id", goal_key)),
+        goal_key=str(goal.get("key", goal_key)),
+        goal_name=_optional_text(goal.get("name")),
+        account_id=snapshot.account_id,
+        project_id=snapshot.project_id,
+        conversion_data=conversion_data,
+        bucketing_data=bucketing_data,
+    )
+
+
+def build_conversion_result(
+    snapshot: ConfigSnapshot,
+    *,
+    visitor_id: str,
+    goal: Mapping[str, object],
+    goal_key: str,
+    normalized_conversion_data: Mapping[str, Any],
+    visitor_attributes: Optional[Mapping[str, Any]] = None,
+    location_attributes: Optional[Mapping[str, Any]] = None,
+    environment: Optional[str] = None,
+    include_base_conversion: bool = True,
+    include_transaction_event: bool = True,
+) -> ConversionResult:
+    """Create typed conversion events for a visitor-scoped goal trigger."""
+
+    bucketing_data = _build_bucketing_data(
+        snapshot,
+        visitor_id=visitor_id,
+        visitor_attributes=visitor_attributes or {},
+        location_attributes=location_attributes or {},
+        environment=environment,
+    )
+
+    events: list[ConversionEvent] = []
+    if include_base_conversion:
+        events.append(
+            _build_event(
+                snapshot,
+                visitor_id=visitor_id,
+                goal=goal,
+                goal_key=goal_key,
+                conversion_data=freeze_conversion_data(None),
+                bucketing_data=bucketing_data,
+            )
+        )
+    if normalized_conversion_data and include_transaction_event:
+        events.append(
+            _build_event(
+                snapshot,
+                visitor_id=visitor_id,
+                goal=goal,
+                goal_key=goal_key,
+                conversion_data=normalized_conversion_data,
+                bucketing_data=bucketing_data,
+            )
+        )
+
+    return ConversionResult(events=tuple(events))
+
+
 def track_conversion(
     snapshot: ConfigSnapshot,
     *,
@@ -103,24 +174,15 @@ def track_conversion(
 ) -> ConversionResult:
     """Create a typed conversion result for a visitor-scoped goal trigger."""
 
-    goal = _resolve_goal(snapshot, goal_key)
-    normalized_conversion_data = _normalize_conversion_data(conversion_data)
-    bucketing_data = _build_bucketing_data(
+    goal = resolve_goal(snapshot, goal_key)
+    normalized_conversion_data = normalize_conversion_data(conversion_data)
+    return build_conversion_result(
         snapshot,
         visitor_id=visitor_id,
-        visitor_attributes=visitor_attributes or {},
-        location_attributes=location_attributes or {},
+        goal=goal,
+        goal_key=goal_key,
+        normalized_conversion_data=normalized_conversion_data,
+        visitor_attributes=visitor_attributes,
+        location_attributes=location_attributes,
         environment=environment,
     )
-
-    event = ConversionEvent(
-        visitor_id=visitor_id,
-        goal_id=str(goal.get("id", goal_key)),
-        goal_key=str(goal.get("key", goal_key)),
-        goal_name=_optional_text(goal.get("name")),
-        account_id=snapshot.account_id,
-        project_id=snapshot.project_id,
-        conversion_data=normalized_conversion_data,
-        bucketing_data=bucketing_data,
-    )
-    return ConversionResult(event=event)

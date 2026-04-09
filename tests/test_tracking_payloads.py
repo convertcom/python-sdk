@@ -12,6 +12,7 @@ def test_serialize_tracking_payload_matches_expected_shape() -> None:
         conversion_data={"amount": 10.3, "productsCount": 2},
         location_attributes={"path": "/checkout"},
     )
+    assert result.event is not None
 
     payload = serialize_tracking_payload([result.event])
 
@@ -47,7 +48,10 @@ def test_serialize_tracking_payload_groups_events_by_visitor() -> None:
     second = context.track_conversion(
         "purchase",
         conversion_data={"transactionId": "txn-1"},
+        force_multiple_transactions=True,
     )
+    assert first.event is not None
+    assert second.event is not None
 
     payload = serialize_tracking_payload([first.event, second.event])
 

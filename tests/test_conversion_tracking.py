@@ -23,6 +23,8 @@ def test_track_conversion_returns_a_typed_result_for_a_known_goal() -> None:
 
     assert isinstance(result, ConversionResult)
     assert isinstance(result.event, ConversionEvent)
+    assert result.queued_event_count == 1
+    assert result.duplicate_prevented is False
     assert result.event.event_type == "conversion"
     assert result.event.visitor_id == "visitor-123"
     assert result.event.goal_id == "goal-1"
@@ -46,6 +48,9 @@ def test_track_conversion_carries_conversion_data_and_bucketing_context() -> Non
         location_attributes={"path": "/checkout"},
     )
 
+    assert result.queued_event_count == 2
+    assert len(result.events) == 2
+    assert result.events[0].conversion_data == {}
     assert result.event.conversion_data == {
         "amount": 10.3,
         "productsCount": 2,
