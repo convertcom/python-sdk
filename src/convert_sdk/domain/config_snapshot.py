@@ -32,8 +32,12 @@ def _extract_key(value: Mapping[str, Any]) -> str | None:
     return None
 
 
-def build_entity_index(values: Any) -> Mapping[str, Mapping[str, Any]]:
+def build_entity_index(
+    values: Any,
+    *identity_fields: str,
+) -> Mapping[str, Mapping[str, Any]]:
     index: MutableMapping[str, Mapping[str, Any]] = {}
+    identity_candidates = identity_fields or ("key", "id", "slug")
 
     if isinstance(values, Mapping):
         items: Iterable[tuple[Any, Any]] = values.items()
@@ -46,12 +50,23 @@ def build_entity_index(values: Any) -> Mapping[str, Mapping[str, Any]]:
         for value in values:
             if not isinstance(value, Mapping):
                 continue
-            key = _extract_key(value)
+            key = _extract_identity(value, identity_candidates)
             if key is None:
                 continue
             index[key] = freeze_mapping(value)
 
     return MappingProxyType(dict(index))
+
+
+def _extract_identity(
+    value: Mapping[str, Any],
+    candidates: Sequence[str],
+) -> str | None:
+    for candidate in candidates:
+        extracted = value.get(candidate)
+        if extracted not in (None, ""):
+            return str(extracted)
+    return _extract_key(value)
 
 
 @dataclass(frozen=True)
@@ -63,9 +78,13 @@ class ConfigSnapshot:
     project_id: str | None
     project: Mapping[str, Any]
     experiences_by_key: Mapping[str, Mapping[str, Any]]
+    experiences_by_id: Mapping[str, Mapping[str, Any]]
     features_by_key: Mapping[str, Mapping[str, Any]]
+    features_by_id: Mapping[str, Mapping[str, Any]]
     goals_by_key: Mapping[str, Mapping[str, Any]]
+    goals_by_id: Mapping[str, Mapping[str, Any]]
     audiences_by_key: Mapping[str, Mapping[str, Any]]
+    audiences_by_id: Mapping[str, Mapping[str, Any]]
 
     @classmethod
     def from_config_data(cls, config_data: Mapping[str, Any]) -> "ConfigSnapshot":
@@ -78,8 +97,12 @@ class ConfigSnapshot:
             account_id=str(frozen_data["account_id"]) if "account_id" in frozen_data else None,
             project_id=str(project_mapping["id"]) if "id" in project_mapping else None,
             project=project_mapping,
-            experiences_by_key=build_entity_index(frozen_data.get("experiences", ())),
-            features_by_key=build_entity_index(frozen_data.get("features", ())),
-            goals_by_key=build_entity_index(frozen_data.get("goals", ())),
-            audiences_by_key=build_entity_index(frozen_data.get("audiences", ())),
+            experiences_by_key=build_entity_index(frozen_data.get("experiences", ()), "key"),
+            experiences_by_id=build_entity_index(frozen_data.get("experiences", ()), "id"),
+            features_by_key=build_entity_index(frozen_data.get("features", ()), "key"),
+            features_by_id=build_entity_index(frozen_data.get("features", ()), "id"),
+            goals_by_key=build_entity_index(frozen_data.get("goals", ()), "key"),
+            goals_by_id=build_entity_index(frozen_data.get("goals", ()), "id"),
+            audiences_by_key=build_entity_index(frozen_data.get("audiences", ()), "key"),
+            audiences_by_id=build_entity_index(frozen_data.get("audiences", ()), "id"),
         )

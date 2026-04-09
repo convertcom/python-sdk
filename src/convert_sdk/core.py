@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from .adapters.transport.httpx_transport import HttpxTransport
 from .config import SDKConfig
 from .config_loader.loader import load_config_snapshot
+from .context import Context
 from .domain.config_snapshot import ConfigSnapshot
+from .domain.context_state import ContextState
+from .errors import InitializationError
 from .ports.transport import Transport
 
 class Core:
@@ -54,6 +57,32 @@ class Core:
         """Alias for the current immutable config snapshot."""
 
         return self.snapshot
+
+    def create_context(
+        self,
+        visitor_id: str,
+        visitor_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> Context:
+        """Create a reusable per-visitor context from the current snapshot."""
+
+        if not isinstance(visitor_id, str) or not visitor_id.strip():
+            raise InitializationError("visitor_id is required to create a Context")
+        if self._snapshot is None:
+            raise InitializationError("Core is not ready")
+
+        try:
+            state = ContextState.create(
+                visitor_id=visitor_id,
+                visitor_attributes=visitor_attributes,
+            )
+        except TypeError as exc:
+            raise InitializationError("visitor_attributes must be a mapping") from exc
+
+        return Context(
+            snapshot=self._snapshot,
+            state=state,
+            default_environment=self._config.environment,
+        )
 
     def __repr__(self) -> str:
         return f"Core(is_ready={self.is_ready})"

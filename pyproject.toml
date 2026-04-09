@@ -29,6 +29,7 @@ packages = ["src/convert_sdk"]
 [tool.hatch.build.targets.sdist]
 include = [
     "README.md",
+    "examples/**/*.py",
     "src/convert_sdk/**/*.py",
     "src/convert_sdk/py.typed",
     "tests/**/*.py",
