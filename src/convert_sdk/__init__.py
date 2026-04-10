@@ -1,6 +1,6 @@
 """Stable public import boundary for the Convert Python SDK."""
 
-from .config import SDKConfig, TransportConfig
+from .config import SDKConfig, TrackingConfig, TransportConfig
 from .context import Context
 from .core import Core
 from .domain.results import (
@@ -9,10 +9,12 @@ from .domain.results import (
     ExperienceResult,
     FeatureResult,
     FeatureStatus,
+    TrackingFlushResult,
 )
 from .errors import (
     ConfigLoadError,
     ConfigValidationError,
+    ConversionDataError,
     GoalNotFoundError,
     InitializationError,
     TrackingError,
@@ -22,6 +24,7 @@ from .version import __version__
 __all__ = [
     "ConfigLoadError",
     "ConfigValidationError",
+    "ConversionDataError",
     "Context",
     "Core",
     "ConversionEvent",
@@ -32,6 +35,8 @@ __all__ = [
     "GoalNotFoundError",
     "InitializationError",
     "SDKConfig",
+    "TrackingConfig",
+    "TrackingFlushResult",
     "TrackingError",
     "TransportConfig",
     "__version__",

@@ -23,3 +23,7 @@ class TrackingError(ConvertSDKError):
 
 class GoalNotFoundError(TrackingError):
     """Raised when a conversion references a goal missing from the config."""
+
+
+class ConversionDataError(TrackingError):
+    """Raised when conversion data is malformed for tracking."""

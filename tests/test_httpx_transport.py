@@ -7,12 +7,18 @@ import pytest
 
 from convert_sdk import TransportConfig
 from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
-from convert_sdk.ports.transport import ConfigRequest
+from convert_sdk.ports.transport import ConfigRequest, TrackingRequest
 
 
 class FakeResponse:
     def __init__(self, payload: Any) -> None:
         self._payload = payload
+
+    @property
+    def content(self) -> bytes:
+        if self._payload is None:
+            return b""
+        return b"payload"
 
     def raise_for_status(self) -> None:
         return None
@@ -23,8 +29,10 @@ class FakeResponse:
 
 @dataclass
 class RecordingClient:
-    payload: Any
-    calls: List[Dict[str, Any]] = field(default_factory=list)
+    get_payload: Any = None
+    post_payload: Any = None
+    get_calls: List[Dict[str, Any]] = field(default_factory=list)
+    post_calls: List[Dict[str, Any]] = field(default_factory=list)
 
     def get(
         self,
@@ -33,19 +41,35 @@ class RecordingClient:
         params: Mapping[str, Any] | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> FakeResponse:
-        self.calls.append(
+        self.get_calls.append(
             {
                 "url": url,
                 "params": dict(params or {}),
                 "headers": dict(headers or {}),
             }
         )
-        return FakeResponse(self.payload)
+        return FakeResponse(self.get_payload)
+
+    def post(
+        self,
+        url: str,
+        *,
+        json: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> FakeResponse:
+        self.post_calls.append(
+            {
+                "url": url,
+                "json": dict(json or {}),
+                "headers": dict(headers or {}),
+            }
+        )
+        return FakeResponse(self.post_payload)
 
 
 def test_httpx_transport_uses_expected_route_headers_and_query() -> None:
     client = RecordingClient(
-        payload={"account_id": "1001", "project": {"id": "2002"}},
+        get_payload={"account_id": "1001", "project": {"id": "2002"}},
     )
     transport = HttpxTransport(client=client)
 
@@ -62,7 +86,7 @@ def test_httpx_transport_uses_expected_route_headers_and_query() -> None:
     )
 
     assert payload["project"]["id"] == "2002"
-    assert client.calls == [
+    assert client.get_calls == [
         {
             "url": "https://config.example.com/api/v1/config/1001/2002",
             "params": {"environment": "staging"},
@@ -75,8 +99,71 @@ def test_httpx_transport_uses_expected_route_headers_and_query() -> None:
     ]
 
 
+def test_httpx_transport_posts_tracking_payload_to_sdk_key_route() -> None:
+    client = RecordingClient(post_payload={"ok": True})
+    transport = HttpxTransport(client=client)
+
+    result = transport.send_tracking(
+        TrackingRequest(
+            sdk_key="1001/2002",
+            sdk_key_secret="secret-value",
+            account_id="1001",
+            project_id="2002",
+            payload={"visitors": []},
+            transport=TransportConfig(
+                tracking_endpoint="https://track.example.com/v1",
+                headers={"X-Test": "1"},
+            ),
+        )
+    )
+
+    assert result == {"ok": True}
+    assert client.post_calls == [
+        {
+            "url": "https://track.example.com/v1/track/1001/2002",
+            "json": {"visitors": []},
+            "headers": {
+                "Accept": "application/json",
+                "Authorization": "Bearer secret-value",
+                "Content-Type": "application/json",
+                "X-Test": "1",
+            },
+        }
+    ]
+
+
+def test_httpx_transport_uses_account_project_tracking_route_without_sdk_key() -> None:
+    client = RecordingClient(post_payload=None)
+    transport = HttpxTransport(client=client)
+
+    result = transport.send_tracking(
+        TrackingRequest(
+            sdk_key=None,
+            sdk_key_secret=None,
+            account_id="1001",
+            project_id="2002",
+            payload={"visitors": []},
+            transport=TransportConfig(
+                tracking_endpoint="https://track.example.com/v1",
+            ),
+        )
+    )
+
+    assert result == {}
+    assert client.post_calls == [
+        {
+            "url": "https://track.example.com/v1/track/1001/2002",
+            "json": {"visitors": []},
+            "headers": {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        }
+    ]
+
+
 def test_httpx_transport_rejects_non_object_json_payloads() -> None:
-    transport = HttpxTransport(client=RecordingClient(payload=[]))
+    transport = HttpxTransport(client=RecordingClient(get_payload=[]))
 
     with pytest.raises(TypeError, match="non-object JSON payload"):
         transport.fetch_config(

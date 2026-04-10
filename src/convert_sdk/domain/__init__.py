@@ -7,6 +7,7 @@ from .results import (
     ExperienceResult,
     FeatureResult,
     FeatureStatus,
+    TrackingFlushResult,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ExperienceResult",
     "FeatureResult",
     "FeatureStatus",
+    "TrackingFlushResult",
 ]

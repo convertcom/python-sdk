@@ -25,6 +25,15 @@ def validate_sdk_config(config: SDKConfig) -> None:
             "config_endpoint must use HTTPS for sdk_key initialization"
         )
 
+    if not config.transport.tracking_endpoint.startswith("https://"):
+        raise ConfigValidationError("tracking_endpoint must use HTTPS")
+
+    if config.tracking.batch_size < 1:
+        raise ConfigValidationError("tracking.batch_size must be greater than zero")
+
+    if not config.tracking.source.strip():
+        raise ConfigValidationError("tracking.source must be a non-empty string")
+
     if has_config_data:
         validate_config_data(config.config_data)
 
