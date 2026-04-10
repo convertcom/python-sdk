@@ -14,6 +14,8 @@ from .domain.results import (
 )
 from .evaluation.experiences import evaluate_experience, evaluate_experiences
 from .evaluation.features import evaluate_feature, evaluate_features
+from .events import LifecycleEvent, visitor_reference
+from .ports.event_bus import EventBus
 from .tracking.conversions import (
     build_conversion_result,
     normalize_conversion_data,
@@ -31,11 +33,13 @@ class Context:
         state: ContextState,
         *,
         tracking_queue: TrackingQueue,
+        event_bus: EventBus,
         default_environment: Optional[str] = None,
     ) -> None:
         self._snapshot = snapshot
         self._state = state
         self._tracking_queue = tracking_queue
+        self._event_bus = event_bus
         self._default_environment = default_environment
 
     @property
@@ -167,6 +171,13 @@ class Context:
             allow_repeat_reporting=force_multiple_transactions,
         )
         if decision.duplicate_prevented:
+            self._event_bus.emit(
+                LifecycleEvent.CONVERSION_DEDUPLICATED,
+                visitor_ref=visitor_reference(self.visitor_id),
+                goal_id=dedupe_key[1],
+                goal_key=str(goal.get("key", goal_key)),
+                reason="duplicate_prevented",
+            )
             return ConversionResult(duplicate_prevented=True)
 
         result = build_conversion_result(
@@ -180,6 +191,15 @@ class Context:
             environment=environment or self._default_environment,
             include_base_conversion=decision.should_enqueue_conversion,
             include_transaction_event=decision.should_enqueue_transaction,
+        )
+        self._event_bus.emit(
+            LifecycleEvent.CONVERSION_CREATED,
+            visitor_ref=visitor_reference(self.visitor_id),
+            goal_id=dedupe_key[1],
+            goal_key=str(goal.get("key", goal_key)),
+            event_count=len(result.events),
+            has_conversion_data=bool(normalized_conversion_data),
+            force_multiple_transactions=force_multiple_transactions,
         )
         queued_event_count = self._tracking_queue.enqueue(
             result.events,

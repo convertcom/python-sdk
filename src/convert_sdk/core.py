@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
+from .adapters.events.in_memory_event_bus import InMemoryEventBus
 from .adapters.transport.httpx_transport import HttpxTransport
 from .config import SDKConfig
 from .config_loader.loader import load_config_snapshot
@@ -11,8 +12,11 @@ from .context import Context
 from .domain.config_snapshot import ConfigSnapshot
 from .domain.context_state import ContextState
 from .errors import InitializationError
+from .events import LifecycleEvent
+from .ports.event_bus import EventBus, EventHandler
 from .ports.transport import Transport
 from .tracking.queue import TrackingQueue
+
 
 class Core:
     """Stable root export for SDK initialization and config access."""
@@ -25,6 +29,7 @@ class Core:
         self._config = config
         self._snapshot: Optional[ConfigSnapshot] = None
         self._transport = transport or HttpxTransport()
+        self._event_bus: EventBus = InMemoryEventBus()
         self._tracking_queue: Optional[TrackingQueue] = None
         self._initialize()
 
@@ -41,6 +46,7 @@ class Core:
             sdk_key_secret=self._config.sdk_key_secret,
             account_id=self._snapshot.account_id,
             project_id=self._snapshot.project_id,
+            event_bus=self._event_bus,
         )
 
     @property
@@ -69,6 +75,16 @@ class Core:
 
         return self.snapshot
 
+    def on(self, event: LifecycleEvent | str, handler: EventHandler) -> None:
+        """Subscribe to a lifecycle event."""
+
+        self._event_bus.subscribe(LifecycleEvent(event), handler)
+
+    def off(self, event: LifecycleEvent | str, handler: EventHandler) -> None:
+        """Unsubscribe from a lifecycle event."""
+
+        self._event_bus.unsubscribe(LifecycleEvent(event), handler)
+
     def create_context(
         self,
         visitor_id: str,
@@ -93,6 +109,7 @@ class Core:
             snapshot=self._snapshot,
             state=state,
             tracking_queue=self._tracking_queue,
+            event_bus=self._event_bus,
             default_environment=self._config.environment,
         )
 

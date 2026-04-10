@@ -10,6 +10,8 @@ from convert_sdk import (
     FeatureResult,
     FeatureStatus,
     GoalNotFoundError,
+    LifecycleEvent,
+    LifecycleEventPayload,
     SDKConfig,
     TrackingConfig,
     TrackingFlushResult,
@@ -32,8 +34,12 @@ def test_public_import_boundary_is_stable() -> None:
     assert FeatureResult.__module__ == "convert_sdk.domain.results"
     assert FeatureStatus.__module__ == "convert_sdk.domain.results"
     assert GoalNotFoundError.__module__ == "convert_sdk.errors"
+    assert LifecycleEvent.__module__ == "convert_sdk.events"
+    assert LifecycleEventPayload.__module__ == "convert_sdk.events"
     assert TrackingFlushResult.__module__ == "convert_sdk.domain.results"
     assert TrackingError.__module__ == "convert_sdk.errors"
+    assert hasattr(Core, "off")
+    assert hasattr(Core, "on")
     assert hasattr(Context, "release_queues")
     assert hasattr(Context, "track_conversion")
     assert hasattr(Context, "run_experience")

@@ -19,6 +19,7 @@ from .errors import (
     InitializationError,
     TrackingError,
 )
+from .events import LifecycleEvent, LifecycleEventPayload
 from .version import __version__
 
 __all__ = [
@@ -34,6 +35,8 @@ __all__ = [
     "FeatureStatus",
     "GoalNotFoundError",
     "InitializationError",
+    "LifecycleEvent",
+    "LifecycleEventPayload",
     "SDKConfig",
     "TrackingConfig",
     "TrackingFlushResult",
