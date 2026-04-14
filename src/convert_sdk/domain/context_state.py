@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 from .config_snapshot import freeze_mapping, freeze_value
 
 
 EMPTY_VISITOR_ATTRIBUTES = MappingProxyType({})
 EMPTY_VISITOR_PROPERTIES = MappingProxyType({})
+EMPTY_DEFAULT_SEGMENTS: tuple[str, ...] = ()
 
 
 def _freeze_visitor_attributes(
@@ -31,6 +32,27 @@ def _freeze_visitor_properties(
     if not isinstance(visitor_properties, Mapping):
         raise TypeError("visitor_properties must be a mapping")
     return freeze_mapping(visitor_properties)
+
+
+def _freeze_default_segments(
+    default_segments: Optional[Sequence[str]],
+) -> tuple[str, ...]:
+    if default_segments is None:
+        return EMPTY_DEFAULT_SEGMENTS
+    if isinstance(default_segments, (str, bytes, bytearray)):
+        raise TypeError("default_segments must be a sequence of strings")
+    if not isinstance(default_segments, Sequence):
+        raise TypeError("default_segments must be a sequence of strings")
+
+    normalized_segments: list[str] = []
+    seen: set[str] = set()
+    for segment in default_segments:
+        segment_key = str(segment).strip()
+        if not segment_key or segment_key in seen:
+            continue
+        normalized_segments.append(segment_key)
+        seen.add(segment_key)
+    return tuple(normalized_segments)
 
 
 def _merge_persistent_mapping(
@@ -71,6 +93,7 @@ class ContextState:
     visitor_id: str
     visitor_attributes: Mapping[str, Any]
     visitor_properties: Mapping[str, Any]
+    default_segments: tuple[str, ...]
 
     @classmethod
     def create(
@@ -78,11 +101,13 @@ class ContextState:
         visitor_id: str,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         visitor_properties: Optional[Mapping[str, Any]] = None,
+        default_segments: Optional[Sequence[str]] = None,
     ) -> "ContextState":
         return cls(
             visitor_id=visitor_id,
             visitor_attributes=_freeze_visitor_attributes(visitor_attributes),
             visitor_properties=_freeze_visitor_properties(visitor_properties),
+            default_segments=_freeze_default_segments(default_segments),
         )
 
     def resolve_visitor_attributes(
@@ -113,6 +138,7 @@ class ContextState:
                 replace=replace,
             ),
             visitor_properties=self.visitor_properties,
+            default_segments=self.default_segments,
         )
 
     def update_visitor_properties(
@@ -131,4 +157,18 @@ class ContextState:
                 visitor_properties,
                 replace=replace,
             ),
+            default_segments=self.default_segments,
+        )
+
+    def set_default_segments(
+        self,
+        default_segments: Sequence[str],
+    ) -> "ContextState":
+        """Return a new state with updated default segments."""
+
+        return ContextState(
+            visitor_id=self.visitor_id,
+            visitor_attributes=self.visitor_attributes,
+            visitor_properties=self.visitor_properties,
+            default_segments=_freeze_default_segments(default_segments),
         )

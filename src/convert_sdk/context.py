@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 from .domain.config_snapshot import ConfigSnapshot
 from .domain.context_state import ContextState
@@ -12,8 +12,10 @@ from .domain.results import (
     FeatureResult,
     TrackingFlushResult,
 )
+from .evaluation.entity_lookup import get_entity_by_id, get_entity_by_key
 from .evaluation.experiences import evaluate_experience, evaluate_experiences
 from .evaluation.features import evaluate_feature, evaluate_features
+from .evaluation.segments import evaluate_custom_segments, normalize_default_segments
 from .events import LifecycleEvent, visitor_reference
 from .ports.event_bus import EventBus
 from .ports.storage import DataStore
@@ -63,6 +65,12 @@ class Context:
 
         return self._state.visitor_properties
 
+    @property
+    def default_segments(self) -> tuple[str, ...]:
+        """Return the stored default segments for this context."""
+
+        return self._state.default_segments
+
     def update_visitor_attributes(
         self,
         visitor_attributes: Mapping[str, Any],
@@ -95,6 +103,16 @@ class Context:
         )
         self._data_store.save_context_state(self._state)
 
+    def set_default_segments(
+        self,
+        segment_keys: Sequence[str],
+    ) -> None:
+        """Persist the default segments carried with this context."""
+
+        normalized_segments = normalize_default_segments(segment_keys)
+        self._state = self._state.set_default_segments(normalized_segments)
+        self._data_store.save_context_state(self._state)
+
     def _resolve_visitor_attributes(
         self,
         request_attributes: Optional[Mapping[str, Any]] = None,
@@ -102,6 +120,38 @@ class Context:
         """Merge stored visitor attributes with request-scoped overrides."""
 
         return self._state.resolve_visitor_attributes(request_attributes)
+
+    def run_custom_segments(
+        self,
+        segment_keys: Sequence[str],
+        *,
+        rule_data: Optional[Mapping[str, Any]] = None,
+    ) -> tuple[str, ...]:
+        """Return the matched custom segment keys for this visitor context."""
+
+        return evaluate_custom_segments(
+            self._snapshot,
+            segment_keys=segment_keys,
+            attributes=self._resolve_visitor_attributes(rule_data),
+        )
+
+    def get_config_entity(
+        self,
+        entity_type: str,
+        key: str,
+    ) -> Mapping[str, Any] | None:
+        """Return the matching config entity by key or ``None``."""
+
+        return get_entity_by_key(self._snapshot, entity_type, key)
+
+    def get_config_entity_by_id(
+        self,
+        entity_type: str,
+        entity_id: str,
+    ) -> Mapping[str, Any] | None:
+        """Return the matching config entity by id or ``None``."""
+
+        return get_entity_by_id(self._snapshot, entity_type, entity_id)
 
     def run_experience(
         self,

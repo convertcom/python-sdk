@@ -118,6 +118,11 @@ class Core:
                         if existing_state is not None
                         else None
                     ),
+                    default_segments=(
+                        existing_state.default_segments
+                        if existing_state is not None
+                        else None
+                    ),
                 )
                 self._data_store.save_context_state(state)
         except TypeError as exc:

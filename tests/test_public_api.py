@@ -44,7 +44,11 @@ def test_public_import_boundary_is_stable() -> None:
     assert TrackingError.__module__ == "convert_sdk.errors"
     assert hasattr(Core, "off")
     assert hasattr(Core, "on")
+    assert hasattr(Context, "get_config_entity")
+    assert hasattr(Context, "get_config_entity_by_id")
     assert hasattr(Context, "release_queues")
+    assert hasattr(Context, "run_custom_segments")
+    assert hasattr(Context, "set_default_segments")
     assert hasattr(Context, "track_conversion")
     assert hasattr(Context, "update_visitor_attributes")
     assert hasattr(Context, "update_visitor_properties")

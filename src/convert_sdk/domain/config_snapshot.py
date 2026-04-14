@@ -85,6 +85,8 @@ class ConfigSnapshot:
     goals_by_id: Mapping[str, Mapping[str, Any]]
     audiences_by_key: Mapping[str, Mapping[str, Any]]
     audiences_by_id: Mapping[str, Mapping[str, Any]]
+    segments_by_key: Mapping[str, Mapping[str, Any]]
+    segments_by_id: Mapping[str, Mapping[str, Any]]
 
     @classmethod
     def from_config_data(cls, config_data: Mapping[str, Any]) -> "ConfigSnapshot":
@@ -105,4 +107,6 @@ class ConfigSnapshot:
             goals_by_id=build_entity_index(frozen_data.get("goals", ()), "id"),
             audiences_by_key=build_entity_index(frozen_data.get("audiences", ()), "key"),
             audiences_by_id=build_entity_index(frozen_data.get("audiences", ()), "id"),
+            segments_by_key=build_entity_index(frozen_data.get("segments", ()), "key"),
+            segments_by_id=build_entity_index(frozen_data.get("segments", ()), "id"),
         )

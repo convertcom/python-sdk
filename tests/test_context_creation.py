@@ -142,6 +142,20 @@ def test_create_context_reloads_updated_state_for_same_visitor() -> None:
     }
 
 
+def test_create_context_preserves_default_segments_for_same_visitor() -> None:
+    core = build_core()
+    context = core.create_context(
+        "visitor-123",
+        {"country": "US"},
+    )
+
+    context.set_default_segments(["vip-users", "beta-rollout"])
+    reloaded = core.create_context("visitor-123")
+
+    assert context.default_segments == ("vip-users", "beta-rollout")
+    assert reloaded.default_segments == ("vip-users", "beta-rollout")
+
+
 def test_request_specific_attributes_override_stored_values_without_mutation() -> None:
     context = build_core().create_context(
         "visitor-123",
