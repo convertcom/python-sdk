@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from threading import Lock
 from typing import Sequence
 
 from ..config import TrackingConfig, TransportConfig
 from ..domain.results import ConversionEvent, TrackingFlushResult
+from ..events import LifecycleEvent, visitor_reference
+from ..ports.event_bus import EventBus
 from ..ports.transport import TrackingRequest, Transport
 from .payloads import serialize_tracking_payload
+
+
+logger = logging.getLogger("convert_sdk.tracking")
 
 
 @dataclass(frozen=True)
@@ -34,6 +40,7 @@ class TrackingQueue:
         sdk_key_secret: str | None,
         account_id: str | None,
         project_id: str | None,
+        event_bus: EventBus,
     ) -> None:
         self._transport = transport
         self._transport_config = transport_config
@@ -42,6 +49,7 @@ class TrackingQueue:
         self._sdk_key_secret = sdk_key_secret
         self._account_id = account_id
         self._project_id = project_id
+        self._event_bus = event_bus
         self._pending: list[ConversionEvent] = []
         self._triggered_goals: set[tuple[str, str]] = set()
         self._lock = Lock()
@@ -101,7 +109,19 @@ class TrackingQueue:
             self._pending.extend(queued_events)
             if mark_tracked_goal is not None:
                 self._triggered_goals.add(mark_tracked_goal)
-            return len(queued_events)
+            pending_event_count = len(self._pending)
+
+        first = queued_events[0]
+        self._event_bus.emit(
+            LifecycleEvent.TRACKING_EVENT_QUEUED,
+            visitor_ref=visitor_reference(first.visitor_id),
+            goal_id=first.goal_id,
+            goal_key=first.goal_key,
+            queued_event_count=len(queued_events),
+            pending_event_count=pending_event_count,
+            has_conversion_data=any(bool(event.conversion_data) for event in queued_events),
+        )
+        return len(queued_events)
 
     def release(self, reason: str | None = None) -> TrackingFlushResult:
         """Send queued events through the configured transport in batches."""
@@ -120,14 +140,27 @@ class TrackingQueue:
                     remaining_event_count=0,
                     reason=reason,
                 )
+            pending_event_count = len(self._pending)
 
-            while self._pending:
+        self._event_bus.emit(
+            LifecycleEvent.QUEUE_RELEASE_STARTED,
+            reason=reason,
+            pending_event_count=pending_event_count,
+            batch_size=self._tracking_config.batch_size,
+        )
+
+        while True:
+            with self._lock:
+                if not self._pending:
+                    break
                 batch = tuple(self._pending[: self._tracking_config.batch_size])
-                payload = serialize_tracking_payload(
-                    batch,
-                    source=self._tracking_config.source,
-                    enrich_data=self._tracking_config.enrich_data,
-                )
+
+            payload = serialize_tracking_payload(
+                batch,
+                source=self._tracking_config.source,
+                enrich_data=self._tracking_config.enrich_data,
+            )
+            try:
                 self._transport.send_tracking(
                     TrackingRequest(
                         sdk_key=self._sdk_key,
@@ -138,14 +171,42 @@ class TrackingQueue:
                         transport=self._transport_config,
                     )
                 )
-                del self._pending[: len(batch)]
-                delivered_batch_count += 1
-                delivered_event_count += len(batch)
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    remaining_event_count = len(self._pending)
+                details = {
+                    "reason": reason,
+                    "batch_size": len(batch),
+                    "delivered_event_count": delivered_event_count,
+                    "delivered_batch_count": delivered_batch_count,
+                    "remaining_event_count": remaining_event_count,
+                    "error_type": type(exc).__name__,
+                }
+                self._event_bus.emit(
+                    LifecycleEvent.TRACKING_DELIVERY_FAILED,
+                    **details,
+                )
+                logger.warning("tracking delivery failure", extra=details)
+                raise
 
-            return TrackingFlushResult(
-                attempted=True,
-                delivered_event_count=delivered_event_count,
-                delivered_batch_count=delivered_batch_count,
-                remaining_event_count=0,
-                reason=reason,
-            )
+            with self._lock:
+                del self._pending[: len(batch)]
+                remaining_event_count = len(self._pending)
+            delivered_batch_count += 1
+            delivered_event_count += len(batch)
+
+        result = TrackingFlushResult(
+            attempted=True,
+            delivered_event_count=delivered_event_count,
+            delivered_batch_count=delivered_batch_count,
+            remaining_event_count=remaining_event_count,
+            reason=reason,
+        )
+        self._event_bus.emit(
+            LifecycleEvent.QUEUE_RELEASED,
+            reason=reason,
+            delivered_event_count=result.delivered_event_count,
+            delivered_batch_count=result.delivered_batch_count,
+            remaining_event_count=result.remaining_event_count,
+        )
+        return result
