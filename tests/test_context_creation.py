@@ -72,6 +72,76 @@ def test_create_context_reuses_default_in_memory_state_for_same_visitor() -> Non
     assert second.visitor_attributes == {"country": "US", "plan": "pro"}
 
 
+def test_context_can_update_visitor_attributes_without_recreation() -> None:
+    context = build_core().create_context(
+        "visitor-123",
+        {"country": "US", "plan": "free"},
+    )
+
+    context.update_visitor_attributes({"plan": "pro", "city": "Karachi"})
+
+    assert context.visitor_attributes == {
+        "country": "US",
+        "plan": "pro",
+        "city": "Karachi",
+    }
+    assert context._resolve_visitor_attributes() == {
+        "country": "US",
+        "plan": "pro",
+        "city": "Karachi",
+    }
+
+    with pytest.raises(TypeError):
+        context.visitor_attributes["plan"] = "enterprise"
+
+
+def test_context_can_update_visitor_properties_and_properties_override_attributes() -> None:
+    context = build_core().create_context(
+        "visitor-123",
+        {"country": "US", "plan": "free"},
+    )
+
+    context.update_visitor_properties({"plan": "pro", "loyalty": "gold"})
+
+    assert context.visitor_properties == {
+        "plan": "pro",
+        "loyalty": "gold",
+    }
+    assert context._resolve_visitor_attributes() == {
+        "country": "US",
+        "plan": "pro",
+        "loyalty": "gold",
+    }
+
+    with pytest.raises(TypeError):
+        context.visitor_properties["plan"] = "enterprise"
+
+
+def test_create_context_reloads_updated_state_for_same_visitor() -> None:
+    core = build_core()
+    context = core.create_context(
+        "visitor-123",
+        {"country": "US", "plan": "free"},
+    )
+
+    context.update_visitor_attributes({"plan": "pro"})
+    context.update_visitor_properties({"segment": "vip"})
+    reloaded = core.create_context("visitor-123")
+
+    assert reloaded.visitor_attributes == {
+        "country": "US",
+        "plan": "pro",
+    }
+    assert reloaded.visitor_properties == {
+        "segment": "vip",
+    }
+    assert reloaded._resolve_visitor_attributes() == {
+        "country": "US",
+        "plan": "pro",
+        "segment": "vip",
+    }
+
+
 def test_request_specific_attributes_override_stored_values_without_mutation() -> None:
     context = build_core().create_context(
         "visitor-123",

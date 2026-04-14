@@ -52,6 +52,29 @@ def test_run_feature_is_deterministic_for_the_same_visitor_and_snapshot() -> Non
     assert first == second
 
 
+def test_run_feature_uses_updated_mutable_context_state() -> None:
+    context = build_context("visitor-123", {"tier": "free"})
+
+    assert (
+        context.run_feature(
+            "checkout-banner",
+            location_attributes={"path": "/checkout"},
+        )
+        is None
+    )
+
+    context.update_visitor_attributes({"tier": "premium"})
+
+    result = context.run_feature(
+        "checkout-banner",
+        location_attributes={"path": "/checkout"},
+    )
+
+    assert isinstance(result, FeatureResult)
+    assert result.feature_key == "checkout-banner"
+    assert result.status is FeatureStatus.ENABLED
+
+
 def test_run_features_returns_all_applicable_feature_results() -> None:
     context = build_context("visitor-123", {"tier": "premium"})
 

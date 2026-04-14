@@ -16,6 +16,7 @@ from .evaluation.experiences import evaluate_experience, evaluate_experiences
 from .evaluation.features import evaluate_feature, evaluate_features
 from .events import LifecycleEvent, visitor_reference
 from .ports.event_bus import EventBus
+from .ports.storage import DataStore
 from .tracking.conversions import (
     build_conversion_result,
     normalize_conversion_data,
@@ -34,12 +35,14 @@ class Context:
         *,
         tracking_queue: TrackingQueue,
         event_bus: EventBus,
+        data_store: DataStore,
         default_environment: Optional[str] = None,
     ) -> None:
         self._snapshot = snapshot
         self._state = state
         self._tracking_queue = tracking_queue
         self._event_bus = event_bus
+        self._data_store = data_store
         self._default_environment = default_environment
 
     @property
@@ -53,6 +56,44 @@ class Context:
         """Return the stored immutable visitor attributes for this context."""
 
         return self._state.visitor_attributes
+
+    @property
+    def visitor_properties(self) -> Mapping[str, Any]:
+        """Return the stored immutable visitor properties for this context."""
+
+        return self._state.visitor_properties
+
+    def update_visitor_attributes(
+        self,
+        visitor_attributes: Mapping[str, Any],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Persist updated visitor attributes for subsequent evaluations."""
+
+        if not isinstance(replace, bool):
+            raise TypeError("replace must be a boolean")
+        self._state = self._state.update_visitor_attributes(
+            visitor_attributes,
+            replace=replace,
+        )
+        self._data_store.save_context_state(self._state)
+
+    def update_visitor_properties(
+        self,
+        visitor_properties: Mapping[str, Any],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Persist updated visitor properties for subsequent evaluations."""
+
+        if not isinstance(replace, bool):
+            raise TypeError("replace must be a boolean")
+        self._state = self._state.update_visitor_properties(
+            visitor_properties,
+            replace=replace,
+        )
+        self._data_store.save_context_state(self._state)
 
     def _resolve_visitor_attributes(
         self,

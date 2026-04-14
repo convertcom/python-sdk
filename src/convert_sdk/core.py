@@ -103,8 +103,9 @@ class Core:
             raise InitializationError("Core is not ready")
 
         try:
+            existing_state = self._data_store.load_context_state(visitor_id)
             if visitor_attributes is None:
-                state = self._data_store.load_context_state(visitor_id)
+                state = existing_state
                 if state is None:
                     state = ContextState.create(visitor_id=visitor_id)
                     self._data_store.save_context_state(state)
@@ -112,6 +113,11 @@ class Core:
                 state = ContextState.create(
                     visitor_id=visitor_id,
                     visitor_attributes=visitor_attributes,
+                    visitor_properties=(
+                        existing_state.visitor_properties
+                        if existing_state is not None
+                        else None
+                    ),
                 )
                 self._data_store.save_context_state(state)
         except TypeError as exc:
@@ -122,6 +128,7 @@ class Core:
             state=state,
             tracking_queue=self._tracking_queue,
             event_bus=self._event_bus,
+            data_store=self._data_store,
             default_environment=self._config.environment,
         )
 

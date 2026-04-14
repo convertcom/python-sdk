@@ -46,6 +46,8 @@ def test_public_import_boundary_is_stable() -> None:
     assert hasattr(Core, "on")
     assert hasattr(Context, "release_queues")
     assert hasattr(Context, "track_conversion")
+    assert hasattr(Context, "update_visitor_attributes")
+    assert hasattr(Context, "update_visitor_properties")
     assert hasattr(Context, "run_experience")
     assert hasattr(Context, "run_experiences")
     assert hasattr(Context, "run_feature")

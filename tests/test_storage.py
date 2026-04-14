@@ -61,17 +61,26 @@ def test_core_uses_a_custom_data_store_for_context_state_and_tracking_dedup() ->
 
     first = core.create_context("visitor-123", {"plan": "pro"})
     second = core.create_context("visitor-123")
+    second.update_visitor_properties({"tier": "premium"})
     first_result = second.track_conversion("purchase")
+    reloaded = core.create_context("visitor-123")
 
     assert first.visitor_attributes == {"plan": "pro"}
     assert second.visitor_attributes == {"plan": "pro"}
+    assert second.visitor_properties == {"tier": "premium"}
     assert first_result.duplicate_prevented is False
 
     prevented = second.track_conversion("purchase")
 
     assert prevented.duplicate_prevented is True
-    assert store.loaded_visitor_ids == ["visitor-123"]
+    assert reloaded.visitor_properties == {"tier": "premium"}
+    assert store.loaded_visitor_ids == [
+        "visitor-123",
+        "visitor-123",
+        "visitor-123",
+    ]
     assert store.saved_states[0].visitor_attributes == {"plan": "pro"}
+    assert store.saved_states[-1].visitor_properties == {"tier": "premium"}
     assert store.dedupe_checks == [
         ("visitor-123", "5005"),
         ("visitor-123", "5005"),
