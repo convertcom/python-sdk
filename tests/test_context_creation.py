@@ -62,6 +62,16 @@ def test_context_can_be_reused_across_multiple_overlay_preparations() -> None:
     assert context.visitor_attributes == {"country": "US"}
 
 
+def test_create_context_reuses_default_in_memory_state_for_same_visitor() -> None:
+    core = build_core()
+
+    first = core.create_context("visitor-123", {"country": "US", "plan": "pro"})
+    second = core.create_context("visitor-123")
+
+    assert first.visitor_attributes == {"country": "US", "plan": "pro"}
+    assert second.visitor_attributes == {"country": "US", "plan": "pro"}
+
+
 def test_request_specific_attributes_override_stored_values_without_mutation() -> None:
     context = build_core().create_context(
         "visitor-123",

@@ -6,10 +6,12 @@ from convert_sdk import (
     ConversionEvent,
     ConversionResult,
     Core,
+    DataStore,
     ExperienceResult,
     FeatureResult,
     FeatureStatus,
     GoalNotFoundError,
+    InMemoryDataStore,
     LifecycleEvent,
     LifecycleEventPayload,
     SDKConfig,
@@ -30,10 +32,12 @@ def test_public_import_boundary_is_stable() -> None:
     assert ConversionEvent.__module__ == "convert_sdk.domain.results"
     assert ConversionResult.__module__ == "convert_sdk.domain.results"
     assert ConversionDataError.__module__ == "convert_sdk.errors"
+    assert DataStore.__module__ == "convert_sdk.ports.storage"
     assert ExperienceResult.__module__ == "convert_sdk.domain.results"
     assert FeatureResult.__module__ == "convert_sdk.domain.results"
     assert FeatureStatus.__module__ == "convert_sdk.domain.results"
     assert GoalNotFoundError.__module__ == "convert_sdk.errors"
+    assert InMemoryDataStore.__module__ == "convert_sdk.adapters.storage.in_memory"
     assert LifecycleEvent.__module__ == "convert_sdk.events"
     assert LifecycleEventPayload.__module__ == "convert_sdk.events"
     assert TrackingFlushResult.__module__ == "convert_sdk.domain.results"

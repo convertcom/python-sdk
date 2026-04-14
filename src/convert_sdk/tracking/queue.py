@@ -11,6 +11,7 @@ from ..config import TrackingConfig, TransportConfig
 from ..domain.results import ConversionEvent, TrackingFlushResult
 from ..events import LifecycleEvent, visitor_reference
 from ..ports.event_bus import EventBus
+from ..ports.storage import DataStore
 from ..ports.transport import TrackingRequest, Transport
 from .payloads import serialize_tracking_payload
 
@@ -41,6 +42,7 @@ class TrackingQueue:
         account_id: str | None,
         project_id: str | None,
         event_bus: EventBus,
+        data_store: DataStore,
     ) -> None:
         self._transport = transport
         self._transport_config = transport_config
@@ -50,8 +52,8 @@ class TrackingQueue:
         self._account_id = account_id
         self._project_id = project_id
         self._event_bus = event_bus
+        self._data_store = data_store
         self._pending: list[ConversionEvent] = []
-        self._triggered_goals: set[tuple[str, str]] = set()
         self._lock = Lock()
 
     @property
@@ -73,7 +75,7 @@ class TrackingQueue:
 
         dedupe_key = (visitor_id, goal_id)
         with self._lock:
-            goal_already_tracked = dedupe_key in self._triggered_goals
+            goal_already_tracked = self._data_store.has_tracked_goal(*dedupe_key)
             if goal_already_tracked:
                 if not (allow_repeat_reporting and has_conversion_data):
                     return QueueDecision(
@@ -108,7 +110,7 @@ class TrackingQueue:
         with self._lock:
             self._pending.extend(queued_events)
             if mark_tracked_goal is not None:
-                self._triggered_goals.add(mark_tracked_goal)
+                self._data_store.mark_tracked_goal(*mark_tracked_goal)
             pending_event_count = len(self._pending)
 
         first = queued_events[0]

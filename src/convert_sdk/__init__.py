@@ -20,6 +20,8 @@ from .errors import (
     TrackingError,
 )
 from .events import LifecycleEvent, LifecycleEventPayload
+from .adapters.storage import InMemoryDataStore
+from .ports.storage import DataStore
 from .version import __version__
 
 __all__ = [
@@ -30,10 +32,12 @@ __all__ = [
     "Core",
     "ConversionEvent",
     "ConversionResult",
+    "DataStore",
     "ExperienceResult",
     "FeatureResult",
     "FeatureStatus",
     "GoalNotFoundError",
+    "InMemoryDataStore",
     "InitializationError",
     "LifecycleEvent",
     "LifecycleEventPayload",
