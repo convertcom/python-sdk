@@ -1,0 +1,645 @@
+{
+  "config_data": {
+    "account_id": "10022898",
+    "audiences": [
+      {
+        "id": "100299433",
+        "key": "adv-audience",
+        "name": "Adv Audience",
+        "preset": false,
+        "rules": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "varName1",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "value1"
+                    }
+                  ]
+                },
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "varName2",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "value2"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "varName3",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "something"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "status": "active",
+        "type": "transient"
+      }
+    ],
+    "experiences": [
+      {
+        "audiences": [
+          "100299433"
+        ],
+        "environments": [
+          "live",
+          "staging"
+        ],
+        "global_css": ".test-style { display: initial; }",
+        "global_js": "var s = 'test_experience'; console.log(s);",
+        "goals": [
+          "100215959",
+          "100215960",
+          "100215961"
+        ],
+        "id": "100218245",
+        "integrations": [],
+        "key": "test-experience-ab-fullstack-2",
+        "name": "Test Experience AB Fullstack",
+        "settings": {
+          "matching_options": {
+            "audiences": "any"
+          }
+        },
+        "site_area": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "url",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "https://convert.com/"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "status": "active",
+        "type": "a/b_fullstack",
+        "url": "https://convert.com",
+        "variations": [
+          {
+            "changes": [
+              {
+                "data": {
+                  "feature_id": "10024",
+                  "variables_data": {
+                    "caption": "Click that",
+                    "enabled": "true"
+                  }
+                },
+                "id": "100240519",
+                "type": "fullStackFeature"
+              },
+              {
+                "data": {
+                  "feature_id": "10025",
+                  "variables_data": {
+                    "additionalData": {
+                      "foo": "bar",
+                      "v": 2
+                    },
+                    "button-height": 40,
+                    "price": 100
+                  }
+                },
+                "id": "100240521",
+                "type": "fullStackFeature"
+              }
+            ],
+            "id": "100299456",
+            "is_baseline": true,
+            "key": "100299456-original-page",
+            "name": "Original Page",
+            "status": "running",
+            "traffic_allocation": 50
+          },
+          {
+            "changes": [
+              {
+                "data": {
+                  "feature_id": "10024",
+                  "variables_data": {
+                    "caption": "Not allowed",
+                    "enabled": "false"
+                  }
+                },
+                "id": "100240520",
+                "type": "fullStackFeature"
+              }
+            ],
+            "id": "100299457",
+            "is_baseline": false,
+            "key": "100299457-variation-1",
+            "name": "Variation 1",
+            "status": "running",
+            "traffic_allocation": 50
+          }
+        ],
+        "version": 6
+      },
+      {
+        "audiences": [
+          "100299433"
+        ],
+        "environments": [
+          "live",
+          "staging"
+        ],
+        "global_css": ".test-style { display: initial; }",
+        "global_js": "var s = 'test_experience'; console.log(s);",
+        "goals": [
+          "100215959",
+          "100215960",
+          "100215961"
+        ],
+        "id": "100218246",
+        "integrations": [],
+        "key": "test-experience-ab-fullstack-3",
+        "name": "Test Experience AB Fullstack",
+        "settings": {
+          "matching_options": {
+            "audiences": "any"
+          }
+        },
+        "site_area": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "url",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "https://convert.com/"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "status": "active",
+        "type": "a/b_fullstack",
+        "url": "https://convert.com",
+        "variations": [
+          {
+            "changes": [
+              {
+                "data": {
+                  "feature_id": "10024",
+                  "variables_data": {
+                    "caption": "Click that",
+                    "enabled": "true"
+                  }
+                },
+                "id": "100240529",
+                "type": "fullStackFeature"
+              }
+            ],
+            "id": "100299460",
+            "is_baseline": true,
+            "key": "100299460-original-page",
+            "name": "Original Page",
+            "status": "running",
+            "traffic_allocation": 50
+          },
+          {
+            "changes": [
+              {
+                "data": {
+                  "feature_id": "10024",
+                  "variables_data": {
+                    "caption": "Allowed",
+                    "enabled": "true"
+                  }
+                },
+                "id": "100240532",
+                "type": "fullStackFeature"
+              }
+            ],
+            "id": "100299461",
+            "is_baseline": false,
+            "key": "100299461-variation-1",
+            "name": "Variation 1",
+            "status": "running",
+            "traffic_allocation": 50
+          }
+        ],
+        "version": 6
+      },
+      {
+        "audiences": [
+          "100299433"
+        ],
+        "environments": [
+          "live",
+          "staging"
+        ],
+        "global_css": ".test-style { display: initial; }",
+        "global_js": "var s = 'test_experience'; console.log(s);",
+        "goals": [
+          "100215959",
+          "100215960",
+          "100215961"
+        ],
+        "id": "100218247",
+        "integrations": [],
+        "key": "test-experience-ab-fullstack-4",
+        "name": "Test Experience AB Fullstack",
+        "settings": {
+          "matching_options": {
+            "audiences": "any"
+          }
+        },
+        "site_area": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "url",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "https://convert.com/"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "status": "active",
+        "type": "a/b_fullstack",
+        "url": "https://convert.com",
+        "variations": [
+          {}
+        ],
+        "version": 6
+      }
+    ],
+    "features": [
+      {
+        "id": "10024",
+        "key": "feature-1",
+        "name": "Feature 1",
+        "variables": [
+          {
+            "key": "enabled",
+            "type": "boolean"
+          },
+          {
+            "key": "caption",
+            "type": "string"
+          }
+        ]
+      },
+      {
+        "id": "10025",
+        "key": "feature-2",
+        "name": "Feature 2",
+        "variables": [
+          {
+            "key": "price",
+            "type": "float"
+          },
+          {
+            "key": "button-height",
+            "type": "integer"
+          },
+          {
+            "key": "additionalData",
+            "type": "json"
+          }
+        ]
+      },
+      {
+        "id": "10026",
+        "key": "not-attached-feature-3",
+        "name": "Not Attached Feature 3",
+        "variables": [
+          {
+            "key": "fee",
+            "type": "float"
+          },
+          {
+            "key": "link",
+            "type": "string"
+          },
+          {
+            "key": "additionalData",
+            "type": "json"
+          }
+        ]
+      }
+    ],
+    "goals": [
+      {
+        "id": "100215960",
+        "is_system": true,
+        "key": "increase-engagement",
+        "name": "Increase Engagement",
+        "rules": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "action",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "buy"
+                    },
+                    {
+                      "key": "action",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "signup"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "selected_default": true,
+        "settings": {
+          "tracked_items": [
+            {
+              "event": "click",
+              "selector": "a"
+            },
+            {
+              "event": "submit",
+              "selector": "form"
+            }
+          ]
+        },
+        "status": "active",
+        "type": "dom_interaction"
+      },
+      {
+        "id": "100215959",
+        "is_system": true,
+        "key": "decrease-bounce-rate",
+        "name": "Decrease BounceRate",
+        "rules": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "pages_visited_count",
+                      "matching": {
+                        "match_type": "lessEqual",
+                        "negated": true
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": 1
+                    },
+                    {
+                      "key": "visit_duration",
+                      "matching": {
+                        "match_type": "lessEqual",
+                        "negated": true
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": 10
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "selected_default": true,
+        "status": "active",
+        "type": "advanced"
+      },
+      {
+        "id": "100215961",
+        "is_system": false,
+        "key": "adv-goal-country-browser",
+        "name": "adv goal country browser",
+        "rules": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "country",
+                      "matching": {
+                        "match_type": "equals",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "US"
+                    }
+                  ]
+                },
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "browser_name",
+                      "matching": {
+                        "match_type": "equals",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "chrome"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "country",
+                      "matching": {
+                        "match_type": "equals",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "GB"
+                    }
+                  ]
+                },
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "browser_name",
+                      "matching": {
+                        "match_type": "equals",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": "safari"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "selected_default": false,
+        "status": "active",
+        "type": "advanced"
+      },
+      {
+        "id": "100215962",
+        "key": "goal-without-rule"
+      }
+    ],
+    "project": {
+      "domains": [
+        {
+          "hosts": "https://convert.com/",
+          "id": "10029181",
+          "tld": false
+        }
+      ],
+      "environments": {
+        "live": "Live",
+        "staging": "Staging"
+      },
+      "id": "10025986",
+      "name": "Test Project",
+      "settings": {
+        "auto_link": false,
+        "data_anonymization": false,
+        "do_not_track": "OFF",
+        "include_jquery": false
+      },
+      "type": "fullstack",
+      "utc_offset": 0
+    },
+    "segments": [
+      {
+        "id": "200299434",
+        "key": "test-segments-1",
+        "name": "Test Segments",
+        "preset": false,
+        "rules": {
+          "OR": [
+            {
+              "AND": [
+                {
+                  "OR_WHEN": [
+                    {
+                      "key": "enabled",
+                      "matching": {
+                        "match_type": "matches",
+                        "negated": false
+                      },
+                      "rule_type": "generic_key_value",
+                      "value": true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "status": "active"
+      }
+    ]
+  },
+  "environment": "staging",
+  "scenarios": [
+    {
+      "context_visitor_attributes": {
+        "browser": "chrome",
+        "country": "US"
+      },
+      "expected": {
+        "matched_segment_keys": [
+          "test-segments-1"
+        ]
+      },
+      "name": "custom_segment_matches_when_enabled_true",
+      "rule_data": {
+        "enabled": true
+      },
+      "segment_keys": [
+        "test-segments-1"
+      ],
+      "visitor_id": "XXX"
+    },
+    {
+      "context_visitor_attributes": {
+        "browser": "chrome",
+        "country": "US"
+      },
+      "expected": {
+        "matched_segment_keys": []
+      },
+      "name": "custom_segment_does_not_match_when_enabled_false",
+      "rule_data": {
+        "enabled": false
+      },
+      "segment_keys": [
+        "test-segments-1"
+      ],
+      "visitor_id": "XXX"
+    }
+  ],
+  "source": {
+    "generation_command": "uv run python scripts/generate_parity_fixtures.py",
+    "javascript_config": "tests/test-config.json",
+    "javascript_sdk_root": "../javascript-sdk/packages/js-sdk"
+  }
+}
