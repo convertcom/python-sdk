@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping, Optional
 
 from .adapters.events.in_memory_event_bus import InMemoryEventBus
@@ -9,6 +10,7 @@ from .adapters.storage.in_memory import InMemoryDataStore
 from .adapters.transport.httpx_transport import HttpxTransport
 from .config import SDKConfig
 from .config_loader.loader import load_config_snapshot
+from .diagnostics import config_source, log_diagnostic_event, snapshot_entity_counts
 from .context import Context
 from .domain.config_snapshot import ConfigSnapshot
 from .domain.context_state import ContextState
@@ -38,10 +40,27 @@ class Core:
         self._initialize()
 
     def _initialize(self) -> None:
-        self._snapshot = load_config_snapshot(
-            self._config,
-            transport=self._transport,
+        source = config_source(self._config.config_data, self._config.sdk_key)
+        log_diagnostic_event(
+            "sdk.initialization.started",
+            source=source,
+            has_environment=bool(self._config.environment),
+            transport_type=type(self._transport).__name__,
+            data_store_type=type(self._data_store).__name__,
         )
+        try:
+            self._snapshot = load_config_snapshot(
+                self._config,
+                transport=self._transport,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log_diagnostic_event(
+                "sdk.initialization.failed",
+                level=logging.WARNING,
+                source=source,
+                error_type=type(exc).__name__,
+            )
+            raise
         self._tracking_queue = TrackingQueue(
             transport=self._transport,
             transport_config=self._config.transport,
@@ -52,6 +71,14 @@ class Core:
             project_id=self._snapshot.project_id,
             event_bus=self._event_bus,
             data_store=self._data_store,
+        )
+        log_diagnostic_event(
+            "sdk.initialization.succeeded",
+            source=source,
+            is_ready=self.is_ready,
+            has_account_id=self._snapshot.account_id is not None,
+            has_project_id=self._snapshot.project_id is not None,
+            entity_counts=snapshot_entity_counts(self._snapshot),
         )
 
     @property
@@ -128,6 +155,17 @@ class Core:
         except TypeError as exc:
             raise InitializationError("visitor_attributes must be a mapping") from exc
 
+        log_diagnostic_event(
+            "context.created",
+            visitor_id=visitor_id,
+            had_existing_state=existing_state is not None,
+            supplied_visitor_attribute_count=(
+                len(visitor_attributes) if visitor_attributes is not None else 0
+            ),
+            stored_visitor_attribute_count=len(state.visitor_attributes),
+            stored_visitor_property_count=len(state.visitor_properties),
+            default_segment_count=len(state.default_segments),
+        )
         return Context(
             snapshot=self._snapshot,
             state=state,
