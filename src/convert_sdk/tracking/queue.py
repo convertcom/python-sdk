@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Sequence
 
 from ..config import TrackingConfig, TransportConfig
+from ..diagnostics import log_diagnostic_event
 from ..domain.results import ConversionEvent, TrackingFlushResult
 from ..events import LifecycleEvent, visitor_reference
 from ..ports.event_bus import EventBus
@@ -123,6 +124,14 @@ class TrackingQueue:
             pending_event_count=pending_event_count,
             has_conversion_data=any(bool(event.conversion_data) for event in queued_events),
         )
+        log_diagnostic_event(
+            "tracking.event.queued",
+            visitor_id=first.visitor_id,
+            goal_key=first.goal_key,
+            queued_event_count=len(queued_events),
+            pending_event_count=pending_event_count,
+            has_conversion_data=any(bool(event.conversion_data) for event in queued_events),
+        )
         return len(queued_events)
 
     def release(self, reason: str | None = None) -> TrackingFlushResult:
@@ -146,6 +155,12 @@ class TrackingQueue:
 
         self._event_bus.emit(
             LifecycleEvent.QUEUE_RELEASE_STARTED,
+            reason=reason,
+            pending_event_count=pending_event_count,
+            batch_size=self._tracking_config.batch_size,
+        )
+        log_diagnostic_event(
+            "tracking.queue.release.started",
             reason=reason,
             pending_event_count=pending_event_count,
             batch_size=self._tracking_config.batch_size,
@@ -188,6 +203,11 @@ class TrackingQueue:
                     LifecycleEvent.TRACKING_DELIVERY_FAILED,
                     **details,
                 )
+                log_diagnostic_event(
+                    "tracking.delivery.failed",
+                    level=logging.WARNING,
+                    **details,
+                )
                 logger.warning("tracking delivery failure", extra=details)
                 raise
 
@@ -206,6 +226,13 @@ class TrackingQueue:
         )
         self._event_bus.emit(
             LifecycleEvent.QUEUE_RELEASED,
+            reason=reason,
+            delivered_event_count=result.delivered_event_count,
+            delivered_batch_count=result.delivered_batch_count,
+            remaining_event_count=result.remaining_event_count,
+        )
+        log_diagnostic_event(
+            "tracking.queue.release.succeeded",
             reason=reason,
             delivered_event_count=result.delivered_event_count,
             delivered_batch_count=result.delivered_batch_count,

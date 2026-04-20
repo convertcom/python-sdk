@@ -12,6 +12,7 @@ from .domain.results import (
     FeatureResult,
     TrackingFlushResult,
 )
+from .diagnostics import log_diagnostic_event, mapping_count
 from .evaluation.entity_lookup import get_entity_by_id, get_entity_by_key
 from .evaluation.experiences import evaluate_experience, evaluate_experiences
 from .evaluation.features import evaluate_feature, evaluate_features
@@ -129,11 +130,19 @@ class Context:
     ) -> tuple[str, ...]:
         """Return the matched custom segment keys for this visitor context."""
 
-        return evaluate_custom_segments(
+        result = evaluate_custom_segments(
             self._snapshot,
             segment_keys=segment_keys,
             attributes=self._resolve_visitor_attributes(rule_data),
         )
+        log_diagnostic_event(
+            "evaluation.custom_segments.completed",
+            visitor_id=self.visitor_id,
+            segment_candidate_count=len(segment_keys),
+            matched_segment_count=len(result),
+            request_attribute_count=mapping_count(rule_data),
+        )
+        return result
 
     def get_config_entity(
         self,
@@ -166,7 +175,7 @@ class Context:
         if not isinstance(experience_key, str) or not experience_key.strip():
             raise ValueError("experience_key is required")
 
-        return evaluate_experience(
+        result = evaluate_experience(
             self._snapshot,
             experience_key=experience_key,
             visitor_id=self.visitor_id,
@@ -174,6 +183,17 @@ class Context:
             location_attributes=self._resolve_location_attributes(location_attributes),
             environment=environment or self._default_environment,
         )
+        log_diagnostic_event(
+            "evaluation.experience.completed",
+            visitor_id=self.visitor_id,
+            experience_key=experience_key,
+            matched=result is not None,
+            variation_key=result.variation_key if result is not None else None,
+            request_attribute_count=mapping_count(visitor_attributes),
+            location_attribute_count=mapping_count(location_attributes),
+            environment=environment or self._default_environment,
+        )
+        return result
 
     def run_experiences(
         self,
@@ -184,13 +204,22 @@ class Context:
     ) -> list[ExperienceResult]:
         """Evaluate all applicable experiences locally for this visitor."""
 
-        return evaluate_experiences(
+        results = evaluate_experiences(
             self._snapshot,
             visitor_id=self.visitor_id,
             visitor_attributes=self._resolve_visitor_attributes(visitor_attributes),
             location_attributes=self._resolve_location_attributes(location_attributes),
             environment=environment or self._default_environment,
         )
+        log_diagnostic_event(
+            "evaluation.experiences.completed",
+            visitor_id=self.visitor_id,
+            result_count=len(results),
+            request_attribute_count=mapping_count(visitor_attributes),
+            location_attribute_count=mapping_count(location_attributes),
+            environment=environment or self._default_environment,
+        )
+        return results
 
     def run_feature(
         self,
@@ -206,7 +235,7 @@ class Context:
         if not isinstance(feature_key, str) or not feature_key.strip():
             raise ValueError("feature_key is required")
 
-        return evaluate_feature(
+        result = evaluate_feature(
             self._snapshot,
             feature_key=feature_key,
             visitor_id=self.visitor_id,
@@ -215,6 +244,18 @@ class Context:
             environment=environment or self._default_environment,
             type_cast=type_cast,
         )
+        log_diagnostic_event(
+            "evaluation.feature.completed",
+            visitor_id=self.visitor_id,
+            feature_key=feature_key,
+            matched=result is not None,
+            status=result.status.value if result is not None else "miss",
+            variable_count=len(result.variables) if result is not None else 0,
+            request_attribute_count=mapping_count(visitor_attributes),
+            location_attribute_count=mapping_count(location_attributes),
+            environment=environment or self._default_environment,
+        )
+        return result
 
     def run_features(
         self,
@@ -226,7 +267,7 @@ class Context:
     ) -> list[FeatureResult]:
         """Resolve all applicable features locally for this visitor."""
 
-        return evaluate_features(
+        results = evaluate_features(
             self._snapshot,
             visitor_id=self.visitor_id,
             visitor_attributes=self._resolve_visitor_attributes(visitor_attributes),
@@ -234,6 +275,15 @@ class Context:
             environment=environment or self._default_environment,
             type_cast=type_cast,
         )
+        log_diagnostic_event(
+            "evaluation.features.completed",
+            visitor_id=self.visitor_id,
+            result_count=len(results),
+            request_attribute_count=mapping_count(visitor_attributes),
+            location_attribute_count=mapping_count(location_attributes),
+            environment=environment or self._default_environment,
+        )
+        return results
 
     def track_conversion(
         self,
@@ -255,6 +305,13 @@ class Context:
         normalized_conversion_data = normalize_conversion_data(conversion_data)
         goal = resolve_goal(self._snapshot, goal_key)
         dedupe_key = (self.visitor_id, str(goal.get("id", goal_key)))
+        log_diagnostic_event(
+            "tracking.conversion.started",
+            visitor_id=self.visitor_id,
+            goal_key=str(goal.get("key", goal_key)),
+            has_conversion_data=bool(normalized_conversion_data),
+            force_multiple_transactions=force_multiple_transactions,
+        )
         decision = self._tracking_queue.plan_conversion(
             visitor_id=self.visitor_id,
             goal_id=dedupe_key[1],
@@ -266,6 +323,12 @@ class Context:
                 LifecycleEvent.CONVERSION_DEDUPLICATED,
                 visitor_ref=visitor_reference(self.visitor_id),
                 goal_id=dedupe_key[1],
+                goal_key=str(goal.get("key", goal_key)),
+                reason="duplicate_prevented",
+            )
+            log_diagnostic_event(
+                "tracking.conversion.deduplicated",
+                visitor_id=self.visitor_id,
                 goal_key=str(goal.get("key", goal_key)),
                 reason="duplicate_prevented",
             )
@@ -295,6 +358,14 @@ class Context:
         queued_event_count = self._tracking_queue.enqueue(
             result.events,
             mark_tracked_goal=dedupe_key if decision.should_enqueue_conversion else None,
+        )
+        log_diagnostic_event(
+            "tracking.conversion.queued",
+            visitor_id=self.visitor_id,
+            goal_key=str(goal.get("key", goal_key)),
+            event_count=len(result.events),
+            queued_event_count=queued_event_count,
+            has_conversion_data=bool(normalized_conversion_data),
         )
         return ConversionResult(
             events=result.events,
