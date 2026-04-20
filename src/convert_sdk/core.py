@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional
 
 from .adapters.events.in_memory_event_bus import InMemoryEventBus
+from .adapters.storage.in_memory import InMemoryDataStore
 from .adapters.transport.httpx_transport import HttpxTransport
 from .config import SDKConfig
 from .config_loader.loader import load_config_snapshot
@@ -14,6 +15,7 @@ from .domain.context_state import ContextState
 from .errors import InitializationError
 from .events import LifecycleEvent
 from .ports.event_bus import EventBus, EventHandler
+from .ports.storage import DataStore
 from .ports.transport import Transport
 from .tracking.queue import TrackingQueue
 
@@ -25,10 +27,12 @@ class Core:
         self,
         config: SDKConfig,
         transport: Optional[Transport] = None,
+        data_store: Optional[DataStore] = None,
     ) -> None:
         self._config = config
         self._snapshot: Optional[ConfigSnapshot] = None
         self._transport = transport or HttpxTransport()
+        self._data_store = data_store or InMemoryDataStore()
         self._event_bus: EventBus = InMemoryEventBus()
         self._tracking_queue: Optional[TrackingQueue] = None
         self._initialize()
@@ -47,6 +51,7 @@ class Core:
             account_id=self._snapshot.account_id,
             project_id=self._snapshot.project_id,
             event_bus=self._event_bus,
+            data_store=self._data_store,
         )
 
     @property
@@ -98,10 +103,28 @@ class Core:
             raise InitializationError("Core is not ready")
 
         try:
-            state = ContextState.create(
-                visitor_id=visitor_id,
-                visitor_attributes=visitor_attributes,
-            )
+            existing_state = self._data_store.load_context_state(visitor_id)
+            if visitor_attributes is None:
+                state = existing_state
+                if state is None:
+                    state = ContextState.create(visitor_id=visitor_id)
+                    self._data_store.save_context_state(state)
+            else:
+                state = ContextState.create(
+                    visitor_id=visitor_id,
+                    visitor_attributes=visitor_attributes,
+                    visitor_properties=(
+                        existing_state.visitor_properties
+                        if existing_state is not None
+                        else None
+                    ),
+                    default_segments=(
+                        existing_state.default_segments
+                        if existing_state is not None
+                        else None
+                    ),
+                )
+                self._data_store.save_context_state(state)
         except TypeError as exc:
             raise InitializationError("visitor_attributes must be a mapping") from exc
 
@@ -110,6 +133,7 @@ class Core:
             state=state,
             tracking_queue=self._tracking_queue,
             event_bus=self._event_bus,
+            data_store=self._data_store,
             default_environment=self._config.environment,
         )
 

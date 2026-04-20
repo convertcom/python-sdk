@@ -198,6 +198,28 @@ def test_run_experience_is_deterministic_for_the_same_visitor_and_snapshot() -> 
     assert first == second
 
 
+def test_run_experience_uses_updated_mutable_context_state() -> None:
+    context = build_context("visitor-123", {"tier": "free"})
+
+    assert (
+        context.run_experience(
+            "checkout-flow",
+            location_attributes={"path": "/checkout"},
+        )
+        is None
+    )
+
+    context.update_visitor_properties({"tier": "premium"})
+
+    result = context.run_experience(
+        "checkout-flow",
+        location_attributes={"path": "/checkout"},
+    )
+
+    assert isinstance(result, ExperienceResult)
+    assert result.experience_key == "checkout-flow"
+
+
 def test_run_experiences_returns_only_applicable_results() -> None:
     context = build_context("visitor-123", {"tier": "premium"})
 
