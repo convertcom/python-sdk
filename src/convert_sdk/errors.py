@@ -1,8 +1,26 @@
 """Typed SDK error hierarchy."""
 
+from __future__ import annotations
+
+from types import MappingProxyType
+from typing import Any, Mapping
+
 
 class ConvertSDKError(Exception):
     """Base error for the Convert Python SDK."""
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.context = MappingProxyType(
+            {str(key): value for key, value in (context or {}).items()}
+        )
 
 
 class InitializationError(ConvertSDKError):

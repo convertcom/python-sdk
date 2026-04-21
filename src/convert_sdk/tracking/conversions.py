@@ -28,7 +28,13 @@ def resolve_goal(
     goal = snapshot.goals_by_key.get(goal_key)
     if goal is None:
         raise GoalNotFoundError(
-            f"Unknown goal_key {goal_key!r} for the current config snapshot"
+            f"Goal {goal_key!r} was not found in the current config snapshot.",
+            code="goal.not_found",
+            context={
+                "reason": "goal_not_found",
+                "goal_key": goal_key,
+                "available_goal_count": len(snapshot.goals_by_key),
+            },
         )
     return goal
 

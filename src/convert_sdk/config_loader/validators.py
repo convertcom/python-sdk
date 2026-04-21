@@ -14,25 +14,49 @@ def validate_sdk_config(config: SDKConfig) -> None:
 
     if has_sdk_key == has_config_data:
         raise ConfigValidationError(
-            "Provide exactly one of sdk_key or config_data when initializing Core"
+            "Provide exactly one of sdk_key or config_data when initializing Core",
+            code="config.invalid_source",
+            context={
+                "reason": "exactly_one_config_source_required",
+                "has_sdk_key": has_sdk_key,
+                "has_config_data": has_config_data,
+            },
         )
 
     if config.sdk_key_secret and not config.sdk_key:
-        raise ConfigValidationError("sdk_key_secret requires sdk_key initialization")
+        raise ConfigValidationError(
+            "sdk_key_secret requires sdk_key initialization",
+            code="config.invalid_secret_usage",
+            context={"reason": "sdk_key_secret_without_sdk_key"},
+        )
 
     if has_sdk_key and not config.transport.config_endpoint.startswith("https://"):
         raise ConfigValidationError(
-            "config_endpoint must use HTTPS for sdk_key initialization"
+            "config_endpoint must use HTTPS for sdk_key initialization",
+            code="config.insecure_endpoint",
+            context={"reason": "config_endpoint_must_use_https"},
         )
 
     if not config.transport.tracking_endpoint.startswith("https://"):
-        raise ConfigValidationError("tracking_endpoint must use HTTPS")
+        raise ConfigValidationError(
+            "tracking_endpoint must use HTTPS",
+            code="config.insecure_endpoint",
+            context={"reason": "tracking_endpoint_must_use_https"},
+        )
 
     if config.tracking.batch_size < 1:
-        raise ConfigValidationError("tracking.batch_size must be greater than zero")
+        raise ConfigValidationError(
+            "tracking.batch_size must be greater than zero",
+            code="config.invalid_tracking",
+            context={"reason": "tracking_batch_size_must_be_positive"},
+        )
 
     if not config.tracking.source.strip():
-        raise ConfigValidationError("tracking.source must be a non-empty string")
+        raise ConfigValidationError(
+            "tracking.source must be a non-empty string",
+            code="config.invalid_tracking",
+            context={"reason": "tracking_source_required"},
+        )
 
     if has_config_data:
         validate_config_data(config.config_data)
@@ -40,12 +64,24 @@ def validate_sdk_config(config: SDKConfig) -> None:
 
 def validate_config_data(config_data: Mapping[str, Any] | None) -> None:
     if config_data is None or not isinstance(config_data, Mapping):
-        raise ConfigValidationError("config_data must be a mapping")
+        raise ConfigValidationError(
+            "config_data must be a mapping",
+            code="config.invalid_data",
+            context={"reason": "config_data_must_be_mapping"},
+        )
 
     project = config_data.get("project")
     if not isinstance(project, Mapping):
-        raise ConfigValidationError("config_data must include a project mapping")
+        raise ConfigValidationError(
+            "config_data must include a project mapping",
+            code="config.invalid_data",
+            context={"reason": "project_mapping_required", "field": "project"},
+        )
 
     project_id = project.get("id")
     if project_id in (None, ""):
-        raise ConfigValidationError("config_data.project.id is required")
+        raise ConfigValidationError(
+            "config_data.project.id is required",
+            code="config.invalid_data",
+            context={"reason": "project_id_required", "field": "project.id"},
+        )

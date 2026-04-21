@@ -7,7 +7,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from ..domain.config_snapshot import ConfigSnapshot
 from ..domain.config_snapshot import freeze_value
-from ..domain.results import FeatureResult, FeatureStatus, freeze_variables
+from ..domain.results import FeatureDiagnostic, FeatureResult, FeatureStatus, freeze_variables
 from .experiences import SelectedVariation, select_experiences
 
 
@@ -38,6 +38,87 @@ def evaluate_feature(
         feature_keys=(feature_key,),
     )
     return feature_results[0] if feature_results else None
+
+
+def diagnose_feature(
+    snapshot: ConfigSnapshot,
+    *,
+    feature_key: str,
+    visitor_id: str,
+    visitor_attributes: Mapping[str, Any],
+    location_attributes: Mapping[str, Any],
+    environment: str | None = None,
+    type_cast: bool = True,
+) -> FeatureDiagnostic:
+    """Return a typed diagnostic outcome for a single feature request."""
+
+    feature = snapshot.features_by_key.get(feature_key)
+    if feature is None:
+        return FeatureDiagnostic(
+            feature_key=feature_key,
+            resolved=False,
+            reason="feature_not_found",
+            message="Feature was not found in the current config snapshot.",
+            details={"entity_key": feature_key},
+        )
+
+    results = evaluate_features(
+        snapshot,
+        visitor_id=visitor_id,
+        visitor_attributes=visitor_attributes,
+        location_attributes=location_attributes,
+        environment=environment,
+        type_cast=type_cast,
+        feature_keys=(feature_key,),
+    )
+    if results:
+        result = results[0]
+        return FeatureDiagnostic(
+            feature_key=feature_key,
+            resolved=True,
+            reason="resolved",
+            message="Feature resolved from an applicable experience variation.",
+            result=result,
+            details={
+                "entity_key": feature_key,
+                "entity_id": result.feature_id,
+                "environment": environment,
+                "status": result.status.value,
+                "experience_key": result.experience_key,
+                "variation_key": result.variation_key,
+                "variable_count": len(result.variables),
+            },
+        )
+
+    selected_experiences = select_experiences(
+        snapshot,
+        visitor_id=visitor_id,
+        visitor_attributes=visitor_attributes,
+        location_attributes=location_attributes,
+        environment=environment,
+    )
+    reason = (
+        "no_applicable_experience"
+        if not selected_experiences
+        else "feature_not_in_selected_variations"
+    )
+    message = (
+        "No experience qualified for this visitor and request."
+        if not selected_experiences
+        else "Feature exists but was not present in selected variations."
+    )
+    return FeatureDiagnostic(
+        feature_key=feature_key,
+        resolved=False,
+        reason=reason,
+        message=message,
+        details={
+            "entity_key": str(feature.get("key", feature_key)),
+            "entity_id": str(feature.get("id", "")),
+            "environment": environment,
+            "selected_experience_count": len(selected_experiences),
+        },
+    )
 
 
 def evaluate_features(

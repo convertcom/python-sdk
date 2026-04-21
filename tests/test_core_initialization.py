@@ -89,5 +89,11 @@ def test_transport_failure_raises_typed_load_error() -> None:
     )
     transport = FakeTransport(error=RuntimeError("boom"))
 
-    with pytest.raises(ConfigLoadError, match="sdk_key '1001/2002'"):
+    with pytest.raises(ConfigLoadError) as excinfo:
         Core(config, transport=transport)
+
+    error = excinfo.value
+    assert error.code == "config.fetch_failed"
+    assert error.context["source"] == "sdk_key"
+    assert error.context["endpoint_host"] == "config.example.com"
+    assert "1001/2002" not in str(error)

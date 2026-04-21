@@ -8,14 +8,18 @@ from .domain.config_snapshot import ConfigSnapshot
 from .domain.context_state import ContextState
 from .domain.results import (
     ConversionResult,
+    EntityDiagnostic,
+    ExperienceDiagnostic,
     ExperienceResult,
+    FeatureDiagnostic,
     FeatureResult,
+    GoalDiagnostic,
     TrackingFlushResult,
 )
 from .diagnostics import log_diagnostic_event, mapping_count
 from .evaluation.entity_lookup import get_entity_by_id, get_entity_by_key
-from .evaluation.experiences import evaluate_experience, evaluate_experiences
-from .evaluation.features import evaluate_feature, evaluate_features
+from .evaluation.experiences import diagnose_experience, evaluate_experiences
+from .evaluation.features import diagnose_feature, evaluate_features
 from .evaluation.segments import evaluate_custom_segments, normalize_default_segments
 from .events import LifecycleEvent, visitor_reference
 from .ports.event_bus import EventBus
@@ -153,6 +157,30 @@ class Context:
 
         return get_entity_by_key(self._snapshot, entity_type, key)
 
+    def diagnose_config_entity(
+        self,
+        entity_type: str,
+        key: str,
+    ) -> EntityDiagnostic:
+        """Return a non-exception diagnostic outcome for a config entity lookup."""
+
+        entity = get_entity_by_key(self._snapshot, entity_type, key)
+        diagnostic = self._entity_diagnostic(
+            entity_type,
+            lookup="key",
+            value=key,
+            resolved=entity is not None,
+        )
+        log_diagnostic_event(
+            "lookup.entity.completed",
+            entity_type=diagnostic.entity_type,
+            lookup=diagnostic.lookup,
+            entity_key=diagnostic.value,
+            resolved=diagnostic.resolved,
+            reason=diagnostic.reason,
+        )
+        return diagnostic
+
     def get_config_entity_by_id(
         self,
         entity_type: str,
@@ -161,6 +189,30 @@ class Context:
         """Return the matching config entity by id or ``None``."""
 
         return get_entity_by_id(self._snapshot, entity_type, entity_id)
+
+    def diagnose_config_entity_by_id(
+        self,
+        entity_type: str,
+        entity_id: str,
+    ) -> EntityDiagnostic:
+        """Return a non-exception diagnostic outcome for a config entity id lookup."""
+
+        entity = get_entity_by_id(self._snapshot, entity_type, entity_id)
+        diagnostic = self._entity_diagnostic(
+            entity_type,
+            lookup="id",
+            value=entity_id,
+            resolved=entity is not None,
+        )
+        log_diagnostic_event(
+            "lookup.entity.completed",
+            entity_type=diagnostic.entity_type,
+            lookup=diagnostic.lookup,
+            entity_id=diagnostic.value,
+            resolved=diagnostic.resolved,
+            reason=diagnostic.reason,
+        )
+        return diagnostic
 
     def run_experience(
         self,
@@ -175,25 +227,54 @@ class Context:
         if not isinstance(experience_key, str) or not experience_key.strip():
             raise ValueError("experience_key is required")
 
-        result = evaluate_experience(
+        diagnostic = self.diagnose_experience(
+            experience_key,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location_attributes,
+            environment=environment,
+        )
+        result = diagnostic.result
+        return result
+
+    def diagnose_experience(
+        self,
+        experience_key: str,
+        *,
+        visitor_attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+        environment: Optional[str] = None,
+    ) -> ExperienceDiagnostic:
+        """Return a diagnosable non-exception outcome for an experience request."""
+
+        if not isinstance(experience_key, str) or not experience_key.strip():
+            raise ValueError("experience_key is required")
+
+        effective_environment = environment or self._default_environment
+        diagnostic = diagnose_experience(
             self._snapshot,
             experience_key=experience_key,
             visitor_id=self.visitor_id,
             visitor_attributes=self._resolve_visitor_attributes(visitor_attributes),
             location_attributes=self._resolve_location_attributes(location_attributes),
-            environment=environment or self._default_environment,
+            environment=effective_environment,
         )
         log_diagnostic_event(
             "evaluation.experience.completed",
             visitor_id=self.visitor_id,
             experience_key=experience_key,
-            matched=result is not None,
-            variation_key=result.variation_key if result is not None else None,
+            matched=diagnostic.resolved,
+            reason=diagnostic.reason,
+            variation_key=(
+                diagnostic.result.variation_key
+                if diagnostic.result is not None
+                else None
+            ),
+            bucket_value=diagnostic.details.get("bucket_value"),
             request_attribute_count=mapping_count(visitor_attributes),
             location_attribute_count=mapping_count(location_attributes),
-            environment=environment or self._default_environment,
+            environment=effective_environment,
         )
-        return result
+        return diagnostic
 
     def run_experiences(
         self,
@@ -235,27 +316,63 @@ class Context:
         if not isinstance(feature_key, str) or not feature_key.strip():
             raise ValueError("feature_key is required")
 
-        result = evaluate_feature(
+        diagnostic = self.diagnose_feature(
+            feature_key,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location_attributes,
+            environment=environment,
+            type_cast=type_cast,
+        )
+        result = diagnostic.result
+        return result
+
+    def diagnose_feature(
+        self,
+        feature_key: str,
+        *,
+        visitor_attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+        environment: Optional[str] = None,
+        type_cast: bool = True,
+    ) -> FeatureDiagnostic:
+        """Return a diagnosable non-exception outcome for a feature request."""
+
+        if not isinstance(feature_key, str) or not feature_key.strip():
+            raise ValueError("feature_key is required")
+
+        effective_environment = environment or self._default_environment
+        diagnostic = diagnose_feature(
             self._snapshot,
             feature_key=feature_key,
             visitor_id=self.visitor_id,
             visitor_attributes=self._resolve_visitor_attributes(visitor_attributes),
             location_attributes=self._resolve_location_attributes(location_attributes),
-            environment=environment or self._default_environment,
+            environment=effective_environment,
             type_cast=type_cast,
         )
         log_diagnostic_event(
             "evaluation.feature.completed",
             visitor_id=self.visitor_id,
             feature_key=feature_key,
-            matched=result is not None,
-            status=result.status.value if result is not None else "miss",
-            variable_count=len(result.variables) if result is not None else 0,
+            matched=diagnostic.resolved,
+            reason=diagnostic.reason,
+            status=(
+                diagnostic.result.status.value
+                if diagnostic.result is not None
+                else "miss"
+            ),
+            variable_count=(
+                len(diagnostic.result.variables)
+                if diagnostic.result is not None
+                else 0
+            ),
+            experience_key=diagnostic.details.get("experience_key"),
+            variation_key=diagnostic.details.get("variation_key"),
             request_attribute_count=mapping_count(visitor_attributes),
             location_attribute_count=mapping_count(location_attributes),
-            environment=environment or self._default_environment,
+            environment=effective_environment,
         )
-        return result
+        return diagnostic
 
     def run_features(
         self,
@@ -303,6 +420,7 @@ class Context:
             raise TypeError("force_multiple_transactions must be a boolean")
 
         normalized_conversion_data = normalize_conversion_data(conversion_data)
+        self.diagnose_goal(goal_key)
         goal = resolve_goal(self._snapshot, goal_key)
         dedupe_key = (self.visitor_id, str(goal.get("id", goal_key)))
         log_diagnostic_event(
@@ -373,6 +491,43 @@ class Context:
             queued_event_count=queued_event_count,
         )
 
+    def diagnose_goal(self, goal_key: str) -> GoalDiagnostic:
+        """Return a non-exception diagnostic outcome for a goal lookup."""
+
+        if not isinstance(goal_key, str) or not goal_key.strip():
+            raise ValueError("goal_key is required")
+
+        goal = self._snapshot.goals_by_key.get(goal_key)
+        if goal is None:
+            diagnostic = GoalDiagnostic(
+                goal_key=goal_key,
+                resolved=False,
+                reason="goal_not_found",
+                message="Goal was not found in the current config snapshot.",
+                details={
+                    "entity_key": goal_key,
+                    "available_goal_count": len(self._snapshot.goals_by_key),
+                },
+            )
+        else:
+            diagnostic = GoalDiagnostic(
+                goal_key=goal_key,
+                resolved=True,
+                reason="resolved",
+                message="Goal resolved from the current config snapshot.",
+                details={
+                    "entity_key": str(goal.get("key", goal_key)),
+                    "entity_id": str(goal.get("id", "")),
+                },
+            )
+        log_diagnostic_event(
+            "lookup.goal.completed",
+            goal_key=goal_key,
+            resolved=diagnostic.resolved,
+            reason=diagnostic.reason,
+        )
+        return diagnostic
+
     def release_queues(self, reason: Optional[str] = None) -> TrackingFlushResult:
         """Explicitly flush queued tracking events through the transport."""
 
@@ -389,6 +544,35 @@ class Context:
         if not isinstance(location_attributes, Mapping):
             raise TypeError("location_attributes must be a mapping")
         return location_attributes
+
+    def _entity_diagnostic(
+        self,
+        entity_type: str,
+        *,
+        lookup: str,
+        value: str,
+        resolved: bool,
+    ) -> EntityDiagnostic:
+        normalized_type = str(entity_type).strip().lower()
+        reason = "resolved" if resolved else "entity_not_found"
+        message = (
+            "Config entity resolved from the current snapshot."
+            if resolved
+            else "Config entity was not found in the current snapshot."
+        )
+        return EntityDiagnostic(
+            entity_type=normalized_type,
+            lookup=lookup,
+            value=value,
+            resolved=resolved,
+            reason=reason,
+            message=message,
+            details={
+                "entity_type": normalized_type,
+                "lookup": lookup,
+                "value": value,
+            },
+        )
 
     def __repr__(self) -> str:
         return f"Context(visitor_id={self.visitor_id!r})"
