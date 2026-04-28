@@ -62,8 +62,10 @@ Booleans and non-string sequence items raise `ConversionDataError`.
 | `event` | `ConversionEvent \| None` | Property: the most-useful single event |
 
 When `conversion_data` is supplied, the SDK creates two events per conversion:
-one base conversion event (no data, for goal attribution) and one transaction
-event (carries the `conversion_data`). Both share the same `goal_id`.
+one base conversion event (no data, for goal attribution) and one revenue/data
+event (carries the `conversion_data`). Both share the same `goal_id` and both
+have `event_type="conversion"` in the wire payload — the distinction lives in
+the presence (or absence) of `goalData` rather than in `eventType`.
 
 ## ConversionEvent fields
 
@@ -107,6 +109,12 @@ that includes `conversion_data`.
 Deduplication state is stored in the `DataStore`. The default `InMemoryDataStore`
 resets between process restarts. If you need persistence across restarts, supply a
 custom `DataStore` implementation — see [Extending](extending.md).
+
+The default in-memory store retains every `(visitor_id, goal_id)` pair seen for
+the lifetime of the process and never evicts entries. For long-lived workers
+(Gunicorn, Celery, FastAPI) that handle many distinct visitors, this is a
+slow-growing memory footprint. Either restart workers periodically, or supply a
+`DataStore` implementation with TTL / LRU eviction (e.g. Redis with expiry).
 
 ## Flushing the queue
 

@@ -126,6 +126,14 @@ print("goals:", len(snapshot.goals_by_key))
 If `core.is_ready` is `True` but entity counts are zero, the config was loaded
 but is empty — check whether the correct environment was requested.
 
+`ConfigSnapshot` (the type returned by `core.snapshot`) lives at
+`convert_sdk.domain.config_snapshot` and is treated as a stable internal type
+for support / introspection use. Its field names (`experiences_by_key`,
+`features_by_key`, `goals_by_key`) are part of that informal contract — they
+will not be renamed without notice — but they are not re-exported from the
+top-level `convert_sdk` package, so import them only from this submodule when
+you need a type annotation.
+
 ## Verifying bucketing parity
 
 To verify that a visitor/experience pair produces the same bucket value as the

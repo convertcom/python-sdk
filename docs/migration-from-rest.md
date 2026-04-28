@@ -49,7 +49,7 @@ core = Core(
         ),
     )
 )
-# core._snapshot holds the parsed config; no manual JSON parsing needed
+# core.snapshot holds the parsed config; no manual JSON parsing needed
 ```
 
 ## Side-by-side: bucketing
@@ -65,9 +65,14 @@ def bucket_visitor(experience_id, visitor_id, seed=9999):
     return int((hash_value / 4294967296) * 10000)
 
 def select_variation(variations, bucket_value):
-    accumulated = 0
+    # NOTE: traffic_allocation is a percentage (0-100); bucket_value is in
+    # 0-9999. Multiply the allocation by 100 before comparing — the SDK does
+    # the same in evaluation/bucketing.py::select_variation.
+    accumulated = 0.0
     for variation in variations:
-        accumulated += variation["traffic_allocation"]
+        if variation.get("status") not in (None, "", "active", "running"):
+            continue
+        accumulated += float(variation["traffic_allocation"]) * 100
         if bucket_value < accumulated:
             return variation["id"]
     return None
@@ -98,7 +103,11 @@ if result is not None:
 ```
 
 The SDK's `bucket_value` matches the value a correct manual MurmurHash3
-implementation would produce for the same inputs.
+implementation would produce for the same inputs. Variation selection in the
+SDK additionally honours the `status` field on each variation (paused or
+excluded variations are skipped) and uses `traffic_allocation * 100` against
+the 0–9999 bucket range — the snippet above mirrors that logic so the two
+paths produce the same variation for any given visitor.
 
 ## Side-by-side: tracking POST
 

@@ -738,6 +738,61 @@ class TestMigrationFromRestGuide:
         assert r1.duplicate_prevented is False
         assert r2.duplicate_prevented is True
 
+    def test_manual_select_variation_matches_sdk(self) -> None:
+        """The 'manual bucketing' snippet in migration-from-rest.md must
+        produce the same variation as the SDK for the same inputs.
+
+        This guards against future drift between the doc's pseudocode and
+        evaluation/bucketing.py::select_variation. If the doc's loop ever
+        diverges from the SDK's logic again (e.g. forgets the *100 multiplier
+        or skips the status filter), this test fails immediately.
+        """
+        from convert_sdk import Core, SDKConfig
+        from convert_sdk.evaluation.bucketing import get_bucket_value
+
+        # Verbatim copy of the snippet currently in docs/migration-from-rest.md
+        # under "Side-by-side: bucketing". Keep these in sync.
+        def select_variation(variations, bucket_value):
+            accumulated = 0.0
+            for variation in variations:
+                if variation.get("status") not in (None, "", "active", "running"):
+                    continue
+                accumulated += float(variation["traffic_allocation"]) * 100
+                if bucket_value < accumulated:
+                    return variation["id"]
+            return None
+
+        config = _make_config()
+        experience = next(
+            e for e in config["experiences"] if e["key"] == "checkout-flow"
+        )
+
+        core = Core(SDKConfig(config_data=config, environment="production"))
+
+        for visitor_id in (
+            "visitor-1",
+            "visitor-abc123",
+            "visitor-quoll",
+            "v-2",
+            "v-7",
+            "v-9",
+            "v-100",
+        ):
+            context = core.create_context(visitor_id, {"tier": "premium"})
+            sdk_result = context.run_experience(
+                "checkout-flow",
+                location_attributes={"path": "/checkout"},
+            )
+            assert sdk_result is not None, visitor_id
+
+            manual_bucket = get_bucket_value(visitor_id, experience["id"])
+            assert manual_bucket == sdk_result.bucket_value, visitor_id
+
+            manual_variation_id = select_variation(
+                experience["variations"], manual_bucket
+            )
+            assert manual_variation_id == sdk_result.variation_id, visitor_id
+
 
 # ---------------------------------------------------------------------------
 # docs/migration-from-javascript.md — code sample coverage

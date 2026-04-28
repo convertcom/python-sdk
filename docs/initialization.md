@@ -124,9 +124,17 @@ except ConfigLoadError as exc:
 
 `Core` is designed to be a long-lived singleton. Create one instance at
 application startup and reuse it. The `TrackingQueue` owned by `Core` is
-thread-safe (protected by a `threading.Lock`), so `Core` is safe to share across
-threads (Django, Gunicorn workers running in the same process) and across async
-tasks.
+protected by a `threading.Lock`, so concurrent `track_conversion()` and
+`release_queues()` calls from different threads will not corrupt the queue.
+
+Caveat: `Core.create_context()` performs an unlocked
+`load_context_state` → `save_context_state` round-trip against the configured
+`DataStore`. With the default `InMemoryDataStore`, two threads calling
+`create_context()` for the *same* `visitor_id` at the same time can race and
+overwrite each other's stored state. If you create contexts concurrently for
+the same visitor (uncommon — most apps create one context per request), wrap
+`create_context()` in your own lock or supply a `DataStore` that serialises
+read-modify-write internally.
 
 ```python
 # application startup

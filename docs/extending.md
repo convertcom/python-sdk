@@ -86,7 +86,17 @@ signatures.
 Implement `DataStore` to persist visitor state and goal dedup records across
 process restarts (e.g. Redis, Postgres, Memcache).
 
+`ContextState` is a frozen dataclass exposed at `convert_sdk.domain.context_state`.
+It is not part of the public top-level export — treat it as a stable internal
+type that custom `DataStore` implementations need to construct and inspect. You
+are responsible for choosing a serialization format; the snippet below uses
+`json` over `dataclasses.asdict()` for clarity, but Pickle, MessagePack, or any
+schema you control work equally well.
+
 ```python
+import json
+from dataclasses import asdict
+
 from convert_sdk import Core, SDKConfig, DataStore
 from convert_sdk.domain.context_state import ContextState
 
@@ -101,10 +111,26 @@ class RedisDataStore:
         raw = self._redis.get(f"ctx:{visitor_id}")
         if raw is None:
             return None
-        return ContextState.from_json(raw)  # implement serialization
+        fields = json.loads(raw)
+        return ContextState.create(
+            visitor_id=fields["visitor_id"],
+            visitor_attributes=fields.get("visitor_attributes") or {},
+            visitor_properties=fields.get("visitor_properties") or {},
+            default_segments=fields.get("default_segments") or (),
+        )
 
     def save_context_state(self, state: ContextState) -> None:
-        self._redis.set(f"ctx:{state.visitor_id}", state.to_json())
+        self._redis.set(
+            f"ctx:{state.visitor_id}",
+            json.dumps(
+                {
+                    "visitor_id": state.visitor_id,
+                    "visitor_attributes": dict(state.visitor_attributes),
+                    "visitor_properties": dict(state.visitor_properties),
+                    "default_segments": list(state.default_segments),
+                }
+            ),
+        )
 
     def has_tracked_goal(self, visitor_id: str, goal_id: str) -> bool:
         return bool(self._redis.sismember(f"goals:{visitor_id}", goal_id))
@@ -119,10 +145,19 @@ core = Core(
 )
 ```
 
+Note: `asdict()` works on `ContextState` because it is a frozen dataclass, but
+its `Mapping` fields come back as plain `dict`s — this is what the snippet
+above relies on. Use `ContextState.create(...)` (not the bare constructor) to
+re-hydrate from external storage so frozen-mapping invariants are enforced.
+
 The built-in `InMemoryDataStore` is thread-safe but process-local. Goal
 deduplication state resets on process restart with the default store.
 
 ### DataStore protocol
+
+`ContextState` lives at `convert_sdk.domain.context_state`. It is not in the
+top-level public export, but custom `DataStore` implementations must accept and
+return values of this type.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|

@@ -137,9 +137,9 @@ if feature is not None:
     print(dict(feature.variables))    # type-cast variable dict
 ```
 
-`FeatureStatus` is a `str` enum (`FeatureStatus.ENABLED`, `FeatureStatus.DISABLED`).
-Comparing `feature.status == "enabled"` works because `FeatureStatus` inherits
-from `str`.
+`FeatureStatus` is an enum exposed at `convert_sdk.FeatureStatus`. Compare
+against the enum members (`feature.status == FeatureStatus.ENABLED`) for type
+safety — this is the form the rest of the documentation uses.
 
 ## Tracking conversions
 

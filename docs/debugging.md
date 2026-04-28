@@ -72,8 +72,10 @@ The full list of redacted key patterns is in
 | `sdk.initialization.succeeded` | `Core.__init__` | `is_ready`, `entity_counts` |
 | `sdk.initialization.failed` | `Core.__init__` | `error_type`, `error_code` |
 | `context.created` | `Core.create_context` | `had_existing_state`, `supplied_visitor_attribute_count` |
-| `evaluation.experience.completed` | `Context.run_experience` | `matched`, `reason`, `variation_key`, `bucket_value` |
-| `evaluation.feature.completed` | `Context.run_feature` | `matched`, `reason`, `status` |
+| `evaluation.experience.completed` | `Context.run_experience` / `diagnose_experience` | `matched`, `reason`, `variation_key`, `bucket_value` |
+| `evaluation.experiences.completed` | `Context.run_experiences` | `result_count` |
+| `evaluation.feature.completed` | `Context.run_feature` / `diagnose_feature` | `matched`, `reason`, `status` |
+| `evaluation.features.completed` | `Context.run_features` | `result_count` |
 | `evaluation.custom_segments.completed` | `Context.run_custom_segments` | `matched_segment_count` |
 | `tracking.conversion.started` | `Context.track_conversion` | `has_conversion_data` |
 | `tracking.conversion.queued` | `Context.track_conversion` | `event_count`, `queued_event_count` |

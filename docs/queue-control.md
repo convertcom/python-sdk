@@ -146,10 +146,16 @@ def on_delivery_failed(payload: LifecycleEventPayload) -> None:
 
 core.on(LifecycleEvent.TRACKING_DELIVERY_FAILED, on_delivery_failed)
 
+import httpx
+from convert_sdk import TrackingError
+
 try:
     context.release_queues(reason="end_of_request")
-except Exception:
-    pass  # handler already logged; events remain in queue for next flush
+except (httpx.HTTPError, TrackingError):
+    # Handler already logged; events remain in queue for next flush.
+    # Catch only transport-shaped failures here — programming errors (TypeError,
+    # ValueError, etc.) should still surface so they get fixed.
+    pass
 ```
 
 ## Runtime compatibility matrix

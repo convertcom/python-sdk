@@ -26,9 +26,13 @@ context = core.create_context(
 )
 ```
 
-`visitor_attributes` are merged with any previously stored attributes for that
-visitor. Pass `replace=True` to `update_visitor_attributes()` if you need to
-reset them entirely.
+When `visitor_attributes` is supplied to `create_context()`, the stored
+attributes for that visitor are *replaced* (not merged) — only
+`visitor_properties` and `default_segments` carry over from any previously
+stored state. To merge new attributes onto existing ones, omit the second
+argument from `create_context()` and call
+`context.update_visitor_attributes({...})` afterwards (it merges by default;
+pass `replace=True` to wipe and overwrite).
 
 `Context` is reusable — call multiple evaluation methods on the same instance
 within a request lifecycle.
@@ -117,7 +121,9 @@ if feature.status == FeatureStatus.ENABLED:
 
 Variables are type-cast based on the `type` field declared in the config. The
 supported types are `boolean`, `integer`, `float`, `string`, and `json`. Pass
-`type_cast=False` to `run_feature()` to receive raw strings instead.
+`type_cast=False` to `run_feature()` to skip the cast and receive each variable
+as it appears in the config snapshot (typically a string from the JSON payload,
+but whatever Python type the config produced — no coercion is performed).
 
 ## Running all features at once
 
