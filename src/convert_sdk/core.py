@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping, Optional
+from types import TracebackType
+from typing import Any, Mapping, Optional, Type
 
 from .adapters.events.in_memory_event_bus import InMemoryEventBus
 from .adapters.storage.in_memory import InMemoryDataStore
 from .adapters.transport.httpx_transport import HttpxTransport
 from .config import SDKConfig
 from .config_loader.loader import load_config_snapshot
+from .config_loader.refresh import ConfigRefresher
 from .diagnostics import config_source, log_diagnostic_event, snapshot_entity_counts
 from .context import Context
 from .domain.config_snapshot import ConfigSnapshot
@@ -37,7 +39,10 @@ class Core:
         self._data_store = data_store or InMemoryDataStore()
         self._event_bus: EventBus = InMemoryEventBus()
         self._tracking_queue: Optional[TrackingQueue] = None
+        self._refresher: Optional[ConfigRefresher] = None
+        self._closed = False
         self._initialize()
+        self._maybe_start_refresher()
 
     def _initialize(self) -> None:
         source = config_source(self._config.config_data, self._config.sdk_key)
@@ -82,6 +87,33 @@ class Core:
             entity_counts=snapshot_entity_counts(self._snapshot),
         )
 
+    def _maybe_start_refresher(self) -> None:
+        if self._config.refresh is None:
+            return
+        if self._config.config_data is not None:
+            # Direct-config mode has no remote endpoint; an opt-in refresh
+            # policy here is almost certainly a misconfiguration. Surface
+            # it through diagnostics rather than silently ignoring.
+            log_diagnostic_event(
+                "refresh.skipped",
+                source=config_source(self._config.config_data, self._config.sdk_key),
+                reason="direct_config_no_remote_endpoint",
+            )
+            return
+        self._refresher = ConfigRefresher(
+            self._config,
+            transport=self._transport,
+            apply_snapshot=self._apply_refreshed_snapshot,
+            current_snapshot=lambda: self._snapshot,
+        )
+        self._refresher.start()
+
+    def _apply_refreshed_snapshot(self, snapshot: ConfigSnapshot) -> None:
+        # Single attribute assignment is atomic in CPython, so an
+        # in-flight evaluation reads either the prior or the new
+        # snapshot — never a partial state.
+        self._snapshot = snapshot
+
     @property
     def config(self) -> SDKConfig:
         """Return the initialization config used for the SDK instance."""
@@ -117,6 +149,48 @@ class Core:
         """Unsubscribe from a lifecycle event."""
 
         self._event_bus.unsubscribe(LifecycleEvent(event), handler)
+
+    def refresh_now(self) -> None:
+        """Trigger an immediate config refresh attempt (no-op if disabled)."""
+
+        if self._refresher is None:
+            return
+        self._refresher.trigger_now()
+
+    def close(self) -> None:
+        """Stop background workers and release transport resources.
+
+        Safe to call multiple times. After ``close()`` the SDK instance
+        should not be reused: existing ``Context`` objects retain the
+        last-applied snapshot but no further refresh attempts run and
+        no further tracking deliveries are permitted.
+        """
+
+        if self._closed:
+            return
+        self._closed = True
+        if self._refresher is not None:
+            self._refresher.stop()
+            self._refresher = None
+        # Best-effort transport cleanup; not all transports expose close.
+        close = getattr(self._transport, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                _logger = logging.getLogger("convert_sdk")
+                _logger.exception("transport close failed; suppressing during Core.close()")
+
+    def __enter__(self) -> "Core":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> None:
+        self.close()
 
     def create_context(
         self,
