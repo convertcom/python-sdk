@@ -64,6 +64,24 @@ class TrackingQueue:
         with self._lock:
             return len(self._pending)
 
+    def update_snapshot_metadata(
+        self,
+        *,
+        account_id: str | None,
+        project_id: str | None,
+    ) -> None:
+        """Refresh the account/project ids attached to outgoing tracking events.
+
+        Called by ``Core`` when a refreshed ``ConfigSnapshot`` is applied so
+        that subsequently delivered events carry the new ids. Mirrors the
+        JS SDK's ``ApiManager.setData()`` behaviour. Guarded by ``_lock``
+        so a release in flight observes a consistent pair.
+        """
+
+        with self._lock:
+            self._account_id = account_id
+            self._project_id = project_id
+
     def plan_conversion(
         self,
         *,

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional
 
+from .errors import ConfigValidationError
+
 
 DEFAULT_CONFIG_ENDPOINT = "https://cdn-4.convertexperiments.com/api/v1"
 DEFAULT_TRACKING_ENDPOINT = "https://metrics.convertexperiments.com/v1"
@@ -54,6 +56,56 @@ class RefreshConfig:
     backoff_max_seconds: float = 600.0
     backoff_factor: float = 2.0
     on_terminal_failure: Optional[Callable[[Exception], None]] = None
+
+    def __post_init__(self) -> None:
+        # Misconfigured policies silently corrupt long-running services
+        # (negative sleeps tight-loop the worker, factor<1 inverts the
+        # backoff curve, max<initial fires the terminal callback on the
+        # very first failure). Reject at construction time so the host
+        # gets a clean ConfigValidationError instead of a worker that
+        # mysteriously hammers the upstream or alerts immediately.
+        if self.interval_seconds <= 0:
+            raise ConfigValidationError(
+                "RefreshConfig.interval_seconds must be > 0",
+                code="refresh.invalid_interval",
+                context={"interval_seconds": self.interval_seconds},
+            )
+        if self.jitter_seconds < 0:
+            raise ConfigValidationError(
+                "RefreshConfig.jitter_seconds must be >= 0",
+                code="refresh.invalid_jitter",
+                context={"jitter_seconds": self.jitter_seconds},
+            )
+        if self.jitter_seconds > self.interval_seconds:
+            raise ConfigValidationError(
+                "RefreshConfig.jitter_seconds must not exceed interval_seconds",
+                code="refresh.invalid_jitter",
+                context={
+                    "jitter_seconds": self.jitter_seconds,
+                    "interval_seconds": self.interval_seconds,
+                },
+            )
+        if self.backoff_initial_seconds <= 0:
+            raise ConfigValidationError(
+                "RefreshConfig.backoff_initial_seconds must be > 0",
+                code="refresh.invalid_backoff",
+                context={"backoff_initial_seconds": self.backoff_initial_seconds},
+            )
+        if self.backoff_max_seconds < self.backoff_initial_seconds:
+            raise ConfigValidationError(
+                "RefreshConfig.backoff_max_seconds must be >= backoff_initial_seconds",
+                code="refresh.invalid_backoff",
+                context={
+                    "backoff_initial_seconds": self.backoff_initial_seconds,
+                    "backoff_max_seconds": self.backoff_max_seconds,
+                },
+            )
+        if self.backoff_factor < 1.0:
+            raise ConfigValidationError(
+                "RefreshConfig.backoff_factor must be >= 1.0",
+                code="refresh.invalid_backoff",
+                context={"backoff_factor": self.backoff_factor},
+            )
 
 
 @dataclass(frozen=True)

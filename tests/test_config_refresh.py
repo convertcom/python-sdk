@@ -12,9 +12,10 @@ from typing import Any, Mapping, Optional
 
 import pytest
 
-from convert_sdk import Core, SDKConfig
+from convert_sdk import Core, LifecycleEvent, LifecycleEventPayload, SDKConfig
 from convert_sdk.config import RefreshConfig
 from convert_sdk.config_loader.refresh import ConfigRefresher
+from convert_sdk.errors import ConfigValidationError
 from convert_sdk.ports.transport import ConfigRequest, Transport, TrackingRequest
 
 
@@ -131,7 +132,7 @@ class TestOptInOptOut:
 
     def test_direct_config_does_not_start_refresher(self) -> None:
         transport = RecordingTransport()
-        policy = RefreshConfig(interval_seconds=10.0)
+        policy = RefreshConfig(interval_seconds=10.0, jitter_seconds=0.0)
         config = SDKConfig(
             config_data=_base_config_payload(),
             refresh=policy,
@@ -536,3 +537,176 @@ class TestConstructorGuards:
             core._refresher.start()
             # start() does nothing on a started refresher.
             assert core._refresher._thread is initial_thread
+
+
+# ---------------------------------------------------------------------------
+# Cross-SDK parity with the JavaScript SDK (post-review fixes)
+# ---------------------------------------------------------------------------
+
+
+class TestParityWithJSSDK:
+    """JS's ApiManager.setData() refreshes account/project ids on the tracking
+    surface and fires SystemEvents.CONFIG_UPDATED. The Python SDK has to
+    match both behaviours for the migration-from-javascript guide's
+    behavioural-equivalence claim to hold.
+    """
+
+    def test_tracking_queue_picks_up_refreshed_project_id(self) -> None:
+        first = _base_config_payload()
+        first["account_id"] = "acct-A"
+        first["project"] = {"id": "proj-A", "name": "First"}
+        second = _base_config_payload()
+        second["account_id"] = "acct-B"
+        second["project"] = {"id": "proj-B", "name": "Second"}
+        transport = RecordingTransport(payloads=[first, second])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        with _make_core(transport=transport, refresh=policy) as core:
+            assert core._tracking_queue is not None
+            assert core._tracking_queue._account_id == "acct-A"
+            assert core._tracking_queue._project_id == "proj-A"
+
+            assert core._refresher is not None
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=2.0)
+
+            # The whole point: tracking outbound payloads must now carry
+            # the refreshed account/project ids, not the construction-time
+            # ones. Without update_snapshot_metadata() this would fail.
+            assert core._tracking_queue._account_id == "acct-B"
+            assert core._tracking_queue._project_id == "proj-B"
+
+    def test_config_updated_lifecycle_event_fires_on_change(self) -> None:
+        first = _base_config_payload()
+        second = _config_with_experience("checkout")
+        transport = RecordingTransport(payloads=[first, second])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        received: list[LifecycleEventPayload] = []
+        with _make_core(transport=transport, refresh=policy) as core:
+            core.on(LifecycleEvent.CONFIG_UPDATED, received.append)
+            assert core._refresher is not None
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=2.0)
+
+        assert len(received) == 1
+        payload = received[0]
+        assert payload.event is LifecycleEvent.CONFIG_UPDATED
+        assert payload.details["account_id"] == "1001"
+        assert payload.details["project_id"] == "2002"
+        assert payload.details["entity_counts"]["experiences"] == 1
+
+    def test_config_updated_does_not_fire_when_snapshot_unchanged(self) -> None:
+        payload = _base_config_payload()
+        # Both responses byte-identical so the refresh detects no change
+        # and skips the apply step. CONFIG_UPDATED must not fire — that
+        # would generate spurious cache-bust signals on every refresh.
+        transport = RecordingTransport(payloads=[payload, payload])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        received: list[LifecycleEventPayload] = []
+        with _make_core(transport=transport, refresh=policy) as core:
+            core.on(LifecycleEvent.CONFIG_UPDATED, received.append)
+            assert core._refresher is not None
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=2.0)
+
+        assert received == []
+
+
+# ---------------------------------------------------------------------------
+# RefreshConfig validation (rejects misconfigurations at construction)
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshConfigValidation:
+    """RefreshConfig is a public surface; misconfigurations need to fail
+    fast at construction rather than corrupt the worker at runtime.
+    """
+
+    @pytest.mark.parametrize(
+        "kwargs, expected_code",
+        [
+            ({"interval_seconds": 0.0}, "refresh.invalid_interval"),
+            ({"interval_seconds": -1.0}, "refresh.invalid_interval"),
+            ({"jitter_seconds": -0.5}, "refresh.invalid_jitter"),
+            (
+                {"interval_seconds": 10.0, "jitter_seconds": 20.0},
+                "refresh.invalid_jitter",
+            ),
+            ({"backoff_initial_seconds": 0.0}, "refresh.invalid_backoff"),
+            ({"backoff_initial_seconds": -5.0}, "refresh.invalid_backoff"),
+            (
+                {"backoff_initial_seconds": 60.0, "backoff_max_seconds": 30.0},
+                "refresh.invalid_backoff",
+            ),
+            ({"backoff_factor": 0.5}, "refresh.invalid_backoff"),
+            ({"backoff_factor": 0.0}, "refresh.invalid_backoff"),
+        ],
+    )
+    def test_invalid_policy_is_rejected_at_construction(
+        self, kwargs: dict[str, Any], expected_code: str
+    ) -> None:
+        with pytest.raises(ConfigValidationError) as excinfo:
+            RefreshConfig(**kwargs)
+        assert excinfo.value.code == expected_code
+
+    def test_default_policy_is_valid(self) -> None:
+        # Smoke check that __post_init__ does not reject the documented
+        # defaults — guards against a careless validation tightening.
+        RefreshConfig()
+
+
+# ---------------------------------------------------------------------------
+# Worker resilience: outer exception guard keeps shutdown observable
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerResilience:
+    def test_worker_exits_cleanly_on_unexpected_exception(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Simulate a logging filter / clock subsystem failure that escapes
+        # _do_refresh's own try/except. Without the outer guard the daemon
+        # thread dies silently and is_running quietly flips; with the
+        # guard we see a refresh.worker_crashed diagnostic and any waiter
+        # on wait_for_next_refresh is unblocked.
+        transport = RecordingTransport(payloads=[_base_config_payload()])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        with _make_core(transport=transport, refresh=policy) as core:
+            assert core._refresher is not None
+
+            import convert_sdk.config_loader.refresh as refresh_module
+
+            real_compute = refresh_module.ConfigRefresher._compute_sleep_seconds
+
+            def explode(self: ConfigRefresher) -> float:
+                # Restore so subsequent invocations of refresher in the
+                # same test process don't keep raising.
+                monkeypatch.setattr(
+                    refresh_module.ConfigRefresher,
+                    "_compute_sleep_seconds",
+                    real_compute,
+                )
+                raise RuntimeError("clock subsystem unavailable")
+
+            caplog.set_level(logging.ERROR, logger="convert_sdk.diagnostics")
+            monkeypatch.setattr(
+                refresh_module.ConfigRefresher, "_compute_sleep_seconds", explode
+            )
+            # Wake the worker so it re-enters the loop and hits the
+            # exploded _compute_sleep_seconds. The outer try/except
+            # catches the exception, emits the diagnostic, and exits.
+            core._refresher.trigger_now()
+            # The outer guard sets refresh_completed before exiting so
+            # waiters don't hang.
+            assert core._refresher.wait_for_next_refresh(timeout=2.0)
+
+            # Worker thread is gone; is_running is now False rather than
+            # mysteriously True-while-stuck.
+            core._refresher._thread.join(timeout=2.0)  # type: ignore[union-attr]
+            assert not core._refresher.is_running
+
+        events = [record.__dict__.get("sdk_event") for record in caplog.records]
+        assert "refresh.worker_crashed" in events

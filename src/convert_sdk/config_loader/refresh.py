@@ -136,13 +136,36 @@ class ConfigRefresher:
         # The worker iterates: sleep for the next interval, attempt a
         # refresh, then loop. Sleeps are interruptible so stop() and
         # trigger_now() get sub-second response latency.
-        while not self._stop_event.is_set():
-            sleep_seconds = self._compute_sleep_seconds()
-            self._wake_event.wait(sleep_seconds)
-            self._wake_event.clear()
-            if self._stop_event.is_set():
-                return
-            self._do_refresh()
+        #
+        # The outer guard catches anything _do_refresh's own try/except
+        # cannot reach — a logging filter that raises, a clock subsystem
+        # error, an exhausted RNG. Without it the daemon thread would
+        # silently die and is_running would quietly flip to False; the
+        # service would then sit on stale config indefinitely (exactly
+        # the failure mode 5.2 promises to prevent). We surface a clean
+        # diagnostic and exit instead of pretending nothing happened.
+        try:
+            while not self._stop_event.is_set():
+                sleep_seconds = self._compute_sleep_seconds()
+                self._wake_event.wait(sleep_seconds)
+                self._wake_event.clear()
+                if self._stop_event.is_set():
+                    return
+                self._do_refresh()
+        except Exception as exc:
+            log_diagnostic_event(
+                "refresh.worker_crashed",
+                level=logging.ERROR,
+                error_type=type(exc).__name__,
+                error_code=getattr(exc, "code", None),
+            )
+            _logger.exception(
+                "Refresh worker thread exiting due to unexpected %s; refresh is now stopped.",
+                type(exc).__name__,
+            )
+            # Unblock anyone awaiting wait_for_next_refresh so they don't
+            # hang forever on a worker that has just exited.
+            self._refresh_completed.set()
 
     def _do_refresh(self) -> None:
         source = config_source(self._config.config_data, self._config.sdk_key)

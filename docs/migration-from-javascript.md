@@ -25,6 +25,8 @@ rather than JavaScript idioms.
 | `core.on(event, handler)` | `core.on(LifecycleEvent.X, handler)` | Typed enum instead of string |
 | `core.off(event, handler)` | `core.off(LifecycleEvent.X, handler)` | Same pattern |
 | `context.releaseQueues()` | `context.release_queues(reason=...)` | Optional reason string |
+| `dataRefreshInterval: 300000` (default-on, ms) | `SDKConfig(refresh=RefreshConfig(interval_seconds=300.0))` (opt-in, seconds) | Unit and default differ — see "Background config refresh" below |
+| `'config.updated'` event | `LifecycleEvent.CONFIG_UPDATED` | Fires on every successful refresh that changes the snapshot |
 
 ## Initialization
 
@@ -238,6 +240,54 @@ print(flush_result.delivered_event_count)
 Python's `release_queues()` is synchronous. There is no async variant in the
 default transport. See [Extending](extending.md) for how to replace the transport
 with an async-capable implementation.
+
+## Background config refresh
+
+The two SDKs handle background config refresh differently. **A direct port
+without reading this section will run on stale config indefinitely.**
+
+| Concern | JavaScript | Python |
+|---------|------------|--------|
+| Default behaviour | Always on | Off (`SDKConfig.refresh = None`) |
+| Config field | `dataRefreshInterval` | `SDKConfig.refresh = RefreshConfig(...)` |
+| Units | milliseconds | seconds |
+| On error | Logs and stops rescheduling | Exponential backoff, never gives up |
+| Failure callback | None | `RefreshConfig.on_terminal_failure` |
+| Snapshot-changed event | `'config.updated'` | `LifecycleEvent.CONFIG_UPDATED` |
+
+**JavaScript:**
+
+```javascript
+const core = new Core({
+  sdkKey: process.env.CONVERT_SDK_KEY,
+  dataRefreshInterval: 300000, // 5 minutes, in milliseconds
+});
+
+core.on('config.updated', () => {
+  myCache.invalidate();
+});
+```
+
+**Python:**
+
+```python
+from convert_sdk import Core, SDKConfig, LifecycleEvent
+from convert_sdk.config import RefreshConfig
+
+core = Core(
+    SDKConfig(
+        sdk_key=os.environ["CONVERT_SDK_KEY"],
+        refresh=RefreshConfig(interval_seconds=300.0),  # 5 minutes, in SECONDS
+    )
+)
+
+core.on(LifecycleEvent.CONFIG_UPDATED, lambda payload: my_cache.invalidate())
+```
+
+The Python SDK also exposes a richer policy surface (`jitter_seconds`,
+`backoff_initial_seconds`, `backoff_factor`, `backoff_max_seconds`,
+`on_terminal_failure`) that the JavaScript SDK does not. See
+[`initialization.md` § automatic config refresh](initialization.md#automatic-config-refresh-opt-in).
 
 ## Deliberate Pythonic differences
 

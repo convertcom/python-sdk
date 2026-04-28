@@ -109,10 +109,24 @@ class Core:
         self._refresher.start()
 
     def _apply_refreshed_snapshot(self, snapshot: ConfigSnapshot) -> None:
-        # Single attribute assignment is atomic in CPython, so an
-        # in-flight evaluation reads either the prior or the new
-        # snapshot — never a partial state.
+        # Order matters: refresh the tracking queue's ids first so a reader
+        # that loads the new snapshot pointer can never observe stale
+        # account/project ids. The snapshot pointer flip itself is atomic
+        # in CPython (single attribute assignment), so an in-flight
+        # evaluation reads either the prior or the new snapshot — never a
+        # partial state. Mirrors JS SDK's ApiManager.setData() coupling.
+        if self._tracking_queue is not None:
+            self._tracking_queue.update_snapshot_metadata(
+                account_id=snapshot.account_id,
+                project_id=snapshot.project_id,
+            )
         self._snapshot = snapshot
+        self._event_bus.emit(
+            LifecycleEvent.CONFIG_UPDATED,
+            account_id=snapshot.account_id,
+            project_id=snapshot.project_id,
+            entity_counts=dict(snapshot_entity_counts(snapshot)),
+        )
 
     @property
     def config(self) -> SDKConfig:

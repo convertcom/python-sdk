@@ -192,6 +192,14 @@ core = Core(
   | `refresh.skipped`  | Fetch succeeded but the snapshot is unchanged.       |
   | `refresh.fail`     | Fetch raised. Includes `consecutive_failures`.       |
 
+- Each successful refresh that produces a different snapshot also fires
+  the `LifecycleEvent.CONFIG_UPDATED` lifecycle event with `account_id`,
+  `project_id`, and `entity_counts` details. Subscribe through
+  `core.on(LifecycleEvent.CONFIG_UPDATED, handler)` — this is the Python
+  analog of the JavaScript SDK's `SystemEvents.CONFIG_UPDATED`. The
+  `TrackingQueue`'s `account_id` and `project_id` are also refreshed so
+  conversions queued after a refresh attribute to the new project.
+
 ### Failure handling
 
 - Transient transport failures back off exponentially up to

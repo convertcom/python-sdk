@@ -13,6 +13,7 @@ from typing import Any, Mapping
 class LifecycleEvent(str, Enum):
     """Known SDK lifecycle event names."""
 
+    CONFIG_UPDATED = "config_updated"
     CONVERSION_CREATED = "conversion_created"
     CONVERSION_DEDUPLICATED = "conversion_deduplicated"
     TRACKING_EVENT_QUEUED = "tracking_event_queued"
