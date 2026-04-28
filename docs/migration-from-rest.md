@@ -211,9 +211,35 @@ core = Core(SDKConfig(config_data=project_config, environment="production"))
 
 See [Initialization](initialization.md) for the full `SDKConfig` reference.
 
+## Future async / framework support
+
+The MVP is sync-first. An async public API (`AsyncCore` / `AsyncContext`)
+and framework-specific helpers (`convert-sdk-django`,
+`convert-sdk-fastapi`, `convert-sdk-flask`) are planned for Phase 3.
+If you are migrating from REST today and your service is already async
+(`asyncio` / `httpx.AsyncClient`), you can call the sync SDK from
+async code via `asyncio.to_thread()` until the async surface ships;
+see [Async and framework integrations](async.md) for the design intent.
+
+> ⚠️ **`asyncio.to_thread()` runs on the default event-loop thread
+> executor**, which on CPython is `ThreadPoolExecutor` capped at
+> `min(32, os.cpu_count() + 4)` workers by default. Under a FastAPI
+> service receiving hundreds of concurrent requests, that cap can
+> serialise SDK calls and produce bimodal latency. If you adopt the
+> `to_thread()` bridge, raise the executor size at startup:
+> ```python
+> import asyncio
+> from concurrent.futures import ThreadPoolExecutor
+>
+> loop = asyncio.get_event_loop()
+> loop.set_default_executor(ThreadPoolExecutor(max_workers=128))
+> ```
+> or move SDK calls to a dedicated executor sized for your concurrency.
+
 ## What to read next
 
 - [Initialization](initialization.md) — SDK key and direct config options
 - [Evaluation](evaluation.md) — how the SDK replaces manual bucketing
 - [Tracking](tracking.md) — conversion payload details and dedup rules
 - [Queue control](queue-control.md) — flushing and batching configuration
+- [Roadmap](roadmap.md) — what is shipped, what is planned

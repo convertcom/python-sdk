@@ -316,9 +316,19 @@ concatenated before visitor id) with MurmurHash3 32-bit seed `9999`. If you
 compute the bucket value manually in JavaScript and compare it to
 `ExperienceResult.bucket_value` in Python, the values will match.
 
+## Future async / framework support
+
+The MVP is sync-first. An async public API (`AsyncCore` / `AsyncContext`)
+and framework-specific helpers (`convert-sdk-django`,
+`convert-sdk-fastapi`, `convert-sdk-flask`) are planned for Phase 3 and
+will share the same evaluation core, parity contracts, and adapter
+Protocols as the sync surface. See [Roadmap](roadmap.md) and
+[Async and framework integrations](async.md) for the design intent.
+
 ## What to read next
 
 - [Evaluation](evaluation.md) — full `run_experience()` / `run_feature()` reference
 - [Tracking](tracking.md) — `track_conversion()` options and wire format
 - [Debugging](debugging.md) — `diagnose_experience()` replaces JS SDK debug mode
 - [Extending](extending.md) — replacing transport/storage adapters
+- [Roadmap](roadmap.md) — what is shipped, what is planned
