@@ -332,13 +332,16 @@ def _is_archived_experience(
         return False
     target = str(experience_id)
     if isinstance(archived, Mapping):
-        candidates = (str(value) for value in archived.values())
+        raw_values: Any = list(archived.values())
     else:
+        # ``archived`` may be malformed (e.g. an int from a corrupt
+        # config). Materialise eagerly so a non-iterable value is
+        # caught here rather than deep inside ``any()``.
         try:
-            candidates = (str(value) for value in archived)
+            raw_values = list(archived)
         except TypeError:
             return False
-    return any(candidate == target for candidate in candidates)
+    return any(str(value) == target for value in raw_values)
 
 
 def _environment_matches(experience: Mapping[str, Any], environment: str | None) -> bool:
