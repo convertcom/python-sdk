@@ -145,6 +145,21 @@ python examples/basic_experience.py
 python examples/basic_feature.py
 ```
 
+### Documentation
+
+Full topic guides and migration references are available in [`docs/`](docs/):
+
+- [docs/index.md](docs/index.md) — guide index and public API quick-reference
+- [docs/initialization.md](docs/initialization.md) — SDK key, direct config, transport and tracking options
+- [docs/evaluation.md](docs/evaluation.md) — experiences, features, segments
+- [docs/tracking.md](docs/tracking.md) — conversion events, deduplication, revenue data
+- [docs/queue-control.md](docs/queue-control.md) — explicit flush, batch sizing, lifecycle events
+- [docs/debugging.md](docs/debugging.md) — diagnostic logging, typed errors, `*Diagnostic` result objects
+- [docs/extending.md](docs/extending.md) — custom transport, storage, and event-bus
+- [docs/support-workflows.md](docs/support-workflows.md) — what to gather before filing a bug
+- [docs/migration-from-rest.md](docs/migration-from-rest.md) — moving from raw REST integrations
+- [docs/migration-from-javascript.md](docs/migration-from-javascript.md) — mapping JS SDK concepts to Pythonic equivalents
+
 ### Local Development
 
 ```bash
