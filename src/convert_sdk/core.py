@@ -59,6 +59,7 @@ class Core:
                 level=logging.WARNING,
                 source=source,
                 error_type=type(exc).__name__,
+                error_code=getattr(exc, "code", None),
             )
             raise
         self._tracking_queue = TrackingQueue(

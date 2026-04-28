@@ -13,6 +13,7 @@ from .config_snapshot import freeze_mapping
 EMPTY_VARIABLES = MappingProxyType({})
 EMPTY_CONVERSION_DATA = MappingProxyType({})
 EMPTY_BUCKETING_DATA = MappingProxyType({})
+EMPTY_DIAGNOSTIC_DETAILS = MappingProxyType({})
 
 
 def freeze_variables(variables: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -41,6 +42,16 @@ def freeze_bucketing_data(
     if not bucketing_data:
         return EMPTY_BUCKETING_DATA
     return MappingProxyType({str(key): str(value) for key, value in bucketing_data.items()})
+
+
+def freeze_diagnostic_details(
+    details: Mapping[str, Any] | None,
+) -> Mapping[str, Any]:
+    """Freeze safe diagnostic metadata into an immutable mapping."""
+
+    if not details:
+        return EMPTY_DIAGNOSTIC_DETAILS
+    return freeze_mapping(details)
 
 
 class FeatureStatus(str, Enum):
@@ -77,6 +88,66 @@ class FeatureResult:
     experience_name: str | None = None
     variation_id: str | None = None
     variation_key: str | None = None
+
+
+@dataclass(frozen=True)
+class ExperienceDiagnostic:
+    """Diagnosable outcome for a single experience request."""
+
+    experience_key: str
+    resolved: bool
+    reason: str
+    message: str
+    result: ExperienceResult | None = None
+    details: Mapping[str, Any] = EMPTY_DIAGNOSTIC_DETAILS
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", freeze_diagnostic_details(self.details))
+
+
+@dataclass(frozen=True)
+class FeatureDiagnostic:
+    """Diagnosable outcome for a single feature request."""
+
+    feature_key: str
+    resolved: bool
+    reason: str
+    message: str
+    result: FeatureResult | None = None
+    details: Mapping[str, Any] = EMPTY_DIAGNOSTIC_DETAILS
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", freeze_diagnostic_details(self.details))
+
+
+@dataclass(frozen=True)
+class GoalDiagnostic:
+    """Diagnosable outcome for a conversion goal lookup."""
+
+    goal_key: str
+    resolved: bool
+    reason: str
+    message: str
+    details: Mapping[str, Any] = EMPTY_DIAGNOSTIC_DETAILS
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", freeze_diagnostic_details(self.details))
+
+
+@dataclass(frozen=True)
+class EntityDiagnostic:
+    """Diagnosable outcome for a config entity lookup."""
+
+    entity_type: str
+    lookup: str
+    value: str
+    resolved: bool
+    reason: str
+    message: str
+    details: Mapping[str, Any] = EMPTY_DIAGNOSTIC_DETAILS
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "details", freeze_diagnostic_details(self.details))
 
 
 @dataclass(frozen=True)

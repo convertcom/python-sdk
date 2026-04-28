@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 from ..domain.config_snapshot import ConfigSnapshot
-from ..domain.results import ExperienceResult
-from .bucketing import select_variation
+from ..domain.results import ExperienceDiagnostic, ExperienceResult
+from .bucketing import get_bucket_value, select_variation
 from .rules import evaluate_rules
 
 
@@ -42,6 +42,118 @@ def evaluate_experience(
     if selected is None:
         return None
     return _build_experience_result(selected)
+
+
+def diagnose_experience(
+    snapshot: ConfigSnapshot,
+    *,
+    experience_key: str,
+    visitor_id: str,
+    visitor_attributes: Mapping[str, Any],
+    location_attributes: Mapping[str, Any],
+    environment: str | None = None,
+) -> ExperienceDiagnostic:
+    """Return a typed diagnostic outcome for a single experience request."""
+
+    experience = snapshot.experiences_by_key.get(experience_key)
+    if experience is None:
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="experience_not_found",
+            message="Experience was not found in the current config snapshot.",
+            details={"entity_key": experience_key},
+        )
+
+    details = _experience_details(snapshot, experience, environment=environment)
+    status = experience.get("status")
+    if status not in (None, "", "active"):
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="experience_inactive",
+            message="Experience exists but is not active.",
+            details={**details, "status": str(status)},
+        )
+
+    if not _environment_matches(experience, environment):
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="environment_mismatch",
+            message="Experience does not target the requested environment.",
+            details=details,
+        )
+
+    if not _location_matches(experience, location_attributes):
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="location_mismatch",
+            message="Experience location rules did not match the request.",
+            details=details,
+        )
+
+    if not _audiences_match(snapshot, experience, visitor_attributes):
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="audience_mismatch",
+            message="Visitor did not match the experience audiences.",
+            details=details,
+        )
+
+    variations = tuple(_iter_mappings(experience.get("variations")))
+    if not variations:
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="no_variations",
+            message="Experience has no selectable variations.",
+            details=details,
+        )
+
+    experience_id = str(experience.get("id", experience_key))
+    bucket_value = get_bucket_value(
+        visitor_id,
+        experience_id,
+        **_bucketing_options(snapshot),
+    )
+    bucketed = select_variation(
+        variations,
+        visitor_id=visitor_id,
+        experience_id=experience_id,
+        bucketing_config=_as_mapping(snapshot.raw_data.get("bucketing")),
+    )
+    if bucketed is None:
+        return ExperienceDiagnostic(
+            experience_key=experience_key,
+            resolved=False,
+            reason="no_variation_selected",
+            message="Visitor was not allocated to a running variation.",
+            details={**details, "bucket_value": bucket_value},
+        )
+
+    variation, selected_bucket_value = bucketed
+    selected = SelectedVariation(
+        experience=experience,
+        variation=variation,
+        bucket_value=selected_bucket_value,
+    )
+    result = _build_experience_result(selected)
+    return ExperienceDiagnostic(
+        experience_key=experience_key,
+        resolved=True,
+        reason="resolved",
+        message="Experience resolved to a variation.",
+        result=result,
+        details={
+            **details,
+            "bucket_value": result.bucket_value,
+            "variation_key": result.variation_key,
+            "variation_id": result.variation_id,
+        },
+    )
 
 
 def evaluate_experiences(
@@ -150,6 +262,39 @@ def _build_experience_result(selected: SelectedVariation) -> ExperienceResult:
         variation_name=_as_optional_string(variation.get("name")),
         bucket_value=selected.bucket_value,
     )
+
+
+def _experience_details(
+    snapshot: ConfigSnapshot,
+    experience: Mapping[str, Any],
+    *,
+    environment: str | None,
+) -> Mapping[str, Any]:
+    variations = tuple(_iter_mappings(experience.get("variations")))
+    audience_ids = tuple(
+        str(value) for value in experience.get("audiences", ()) if value not in (None, "")
+    )
+    return {
+        "entity_key": str(experience.get("key", "")),
+        "entity_id": str(experience.get("id", "")),
+        "environment": environment,
+        "has_account_id": snapshot.account_id is not None,
+        "has_project_id": snapshot.project_id is not None,
+        "audience_count": len(audience_ids),
+        "variation_count": len(variations),
+    }
+
+
+def _bucketing_options(snapshot: ConfigSnapshot) -> Mapping[str, int]:
+    bucketing_config = _as_mapping(snapshot.raw_data.get("bucketing"))
+    if bucketing_config is None:
+        return {}
+    options: dict[str, int] = {}
+    if bucketing_config.get("hash_seed") is not None:
+        options["seed"] = int(bucketing_config["hash_seed"])
+    if bucketing_config.get("max_traffic") is not None:
+        options["max_traffic"] = int(bucketing_config["max_traffic"])
+    return options
 
 
 def _experience_qualifies(

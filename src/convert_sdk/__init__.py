@@ -6,9 +6,13 @@ from .core import Core
 from .domain.results import (
     ConversionEvent,
     ConversionResult,
+    EntityDiagnostic,
+    ExperienceDiagnostic,
     ExperienceResult,
+    FeatureDiagnostic,
     FeatureResult,
     FeatureStatus,
+    GoalDiagnostic,
     TrackingFlushResult,
 )
 from .errors import (
@@ -33,9 +37,13 @@ __all__ = [
     "ConversionEvent",
     "ConversionResult",
     "DataStore",
+    "EntityDiagnostic",
+    "ExperienceDiagnostic",
     "ExperienceResult",
+    "FeatureDiagnostic",
     "FeatureResult",
     "FeatureStatus",
+    "GoalDiagnostic",
     "GoalNotFoundError",
     "InMemoryDataStore",
     "InitializationError",

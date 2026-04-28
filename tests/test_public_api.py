@@ -7,9 +7,13 @@ from convert_sdk import (
     ConversionResult,
     Core,
     DataStore,
+    EntityDiagnostic,
+    ExperienceDiagnostic,
     ExperienceResult,
+    FeatureDiagnostic,
     FeatureResult,
     FeatureStatus,
+    GoalDiagnostic,
     GoalNotFoundError,
     InMemoryDataStore,
     LifecycleEvent,
@@ -33,9 +37,13 @@ def test_public_import_boundary_is_stable() -> None:
     assert ConversionResult.__module__ == "convert_sdk.domain.results"
     assert ConversionDataError.__module__ == "convert_sdk.errors"
     assert DataStore.__module__ == "convert_sdk.ports.storage"
+    assert EntityDiagnostic.__module__ == "convert_sdk.domain.results"
+    assert ExperienceDiagnostic.__module__ == "convert_sdk.domain.results"
     assert ExperienceResult.__module__ == "convert_sdk.domain.results"
+    assert FeatureDiagnostic.__module__ == "convert_sdk.domain.results"
     assert FeatureResult.__module__ == "convert_sdk.domain.results"
     assert FeatureStatus.__module__ == "convert_sdk.domain.results"
+    assert GoalDiagnostic.__module__ == "convert_sdk.domain.results"
     assert GoalNotFoundError.__module__ == "convert_sdk.errors"
     assert InMemoryDataStore.__module__ == "convert_sdk.adapters.storage.in_memory"
     assert LifecycleEvent.__module__ == "convert_sdk.events"
@@ -46,6 +54,11 @@ def test_public_import_boundary_is_stable() -> None:
     assert hasattr(Core, "on")
     assert hasattr(Context, "get_config_entity")
     assert hasattr(Context, "get_config_entity_by_id")
+    assert hasattr(Context, "diagnose_config_entity")
+    assert hasattr(Context, "diagnose_config_entity_by_id")
+    assert hasattr(Context, "diagnose_experience")
+    assert hasattr(Context, "diagnose_feature")
+    assert hasattr(Context, "diagnose_goal")
     assert hasattr(Context, "release_queues")
     assert hasattr(Context, "run_custom_segments")
     assert hasattr(Context, "set_default_segments")
