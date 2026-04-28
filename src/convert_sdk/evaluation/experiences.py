@@ -66,14 +66,13 @@ def diagnose_experience(
         )
 
     details = _experience_details(snapshot, experience, environment=environment)
-    status = experience.get("status")
-    if status not in (None, "", "active"):
+    if _is_archived_experience(snapshot, experience):
         return ExperienceDiagnostic(
             experience_key=experience_key,
             resolved=False,
-            reason="experience_inactive",
-            message="Experience exists but is not active.",
-            details={**details, "status": str(status)},
+            reason="experience_archived",
+            message="Experience is listed in archived_experiences.",
+            details=details,
         )
 
     if not _environment_matches(experience, environment):
@@ -305,8 +304,11 @@ def _experience_qualifies(
     location_attributes: Mapping[str, Any],
     environment: str | None,
 ) -> bool:
-    status = experience.get("status")
-    if status not in (None, "", "active"):
+    # JS qualification order (``data-manager.ts:matchRulesByField``):
+    # archived → environment → location → audiences. There is no
+    # ``experience.status`` filter in JS — the prior Python check was a
+    # parity-breaking addition and is removed.
+    if _is_archived_experience(snapshot, experience):
         return False
 
     if not _environment_matches(experience, environment):
@@ -318,14 +320,41 @@ def _experience_qualifies(
     return _audiences_match(snapshot, experience, visitor_attributes)
 
 
+def _is_archived_experience(
+    snapshot: ConfigSnapshot,
+    experience: Mapping[str, Any],
+) -> bool:
+    archived = snapshot.raw_data.get("archived_experiences")
+    if not archived:
+        return False
+    experience_id = experience.get("id")
+    if experience_id in (None, ""):
+        return False
+    target = str(experience_id)
+    if isinstance(archived, Mapping):
+        raw_values: Any = list(archived.values())
+    else:
+        # ``archived`` may be malformed (e.g. an int from a corrupt
+        # config). Materialise eagerly so a non-iterable value is
+        # caught here rather than deep inside ``any()``.
+        try:
+            raw_values = list(archived)
+        except TypeError:
+            return False
+    return any(str(value) == target for value in raw_values)
+
+
 def _environment_matches(experience: Mapping[str, Any], environment: str | None) -> bool:
     if environment in (None, ""):
         return True
 
-    environments = tuple(str(value) for value in experience.get("environments", ()) if value not in (None, ""))
-    if not environments:
+    # JS reads singular ``experience.environment`` (string). The Python
+    # SDK previously read plural ``environments`` (list) which produced
+    # the opposite verdict on configs that ship the singular field.
+    experience_environment = experience.get("environment")
+    if experience_environment in (None, ""):
         return True
-    return environment in environments
+    return str(experience_environment) == environment
 
 
 def _location_matches(
@@ -347,14 +376,14 @@ def _audiences_match(
     if not audience_ids:
         return True
 
+    # JS does not filter audiences by status — the prior Python
+    # ``audience.status not in (None, "", "active")`` check was a
+    # parity-breaking addition. Match JS by evaluating every audience
+    # regardless of an opaque status field on the audience entity.
     results = []
     for audience_id in audience_ids:
         audience = snapshot.audiences_by_id.get(audience_id)
         if audience is None:
-            results.append(False)
-            continue
-        audience_status = audience.get("status")
-        if audience_status not in (None, "", "active"):
             results.append(False)
             continue
         results.append(evaluate_rules(_as_mapping(audience.get("rules")), visitor_attributes))

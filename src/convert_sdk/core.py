@@ -158,7 +158,10 @@ class Core:
         """Expose the current immutable config snapshot."""
 
         if self._snapshot is None:
-            raise RuntimeError("Core is not ready")
+            # Use ``InitializationError`` so a host catching
+            # ``ConvertSDKError`` to handle SDK errors does not miss
+            # this — a bare ``RuntimeError`` would slip through.
+            raise InitializationError("Core is not ready")
         return self._snapshot
 
     @property
@@ -177,24 +180,28 @@ class Core:
 
         self._event_bus.unsubscribe(LifecycleEvent(event), handler)
 
-    def refresh_now(self, *, wait: bool = False, timeout: float = 5.0) -> bool:
+    def refresh_now(self, *, wait: bool = False, timeout: float = 5.0) -> Optional[bool]:
         """Trigger an immediate config refresh attempt.
 
-        With ``wait=False`` (the default), returns immediately after waking
-        the worker. With ``wait=True``, blocks until the next refresh
-        attempt completes (success, snapshot-unchanged skip, transient
-        failure, or terminal failure) or ``timeout`` seconds elapse, and
-        returns whether the attempt completed in time.
+        - With ``wait=False`` (the default): wakes the worker and
+          returns ``None`` immediately. There is no completion signal
+          to report.
+        - With ``wait=True``: blocks until the next refresh attempt
+          completes (success, snapshot-unchanged skip, transient
+          failure, or terminal failure) or ``timeout`` seconds elapse;
+          returns ``True`` if the attempt completed in time, ``False``
+          if it timed out.
 
-        Returns ``True`` and is a no-op if refresh is disabled — there is
-        nothing to wait for.
+        When refresh is disabled (``SDKConfig.refresh=None``) the call
+        is a no-op: returns ``None`` for ``wait=False`` and ``True``
+        for ``wait=True`` (nothing to wait for, "completed" in 0 time).
         """
 
         if self._refresher is None:
-            return True
+            return True if wait else None
         self._refresher.trigger_now()
         if not wait:
-            return True
+            return None
         return self._refresher.wait_for_next_refresh(timeout)
 
     @property

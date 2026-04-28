@@ -13,6 +13,8 @@ def normalize_config_data(config_data: Mapping[str, Any]) -> Mapping[str, Any]:
     normalized.setdefault("features", ())
     normalized.setdefault("goals", ())
     normalized.setdefault("audiences", ())
+    normalized.setdefault("segments", ())
+    normalized.setdefault("archived_experiences", ())
     return normalized
 
 

@@ -42,12 +42,12 @@ def _config_with_experience(experience_key: str = "checkout") -> dict[str, Any]:
         {
             "id": "e1",
             "key": experience_key,
-            "status": "active",
+            "status": "running",
             "variations": [
                 {
                     "id": "v1",
                     "key": "control",
-                    "status": "active",
+                    "status": "running",
                     "traffic_allocation": 100.0,
                 }
             ],
@@ -818,7 +818,10 @@ class TestPublicRefreshSurface:
     def test_refresh_now_returns_true_when_disabled(self) -> None:
         transport = RecordingTransport(payloads=[_base_config_payload()])
         with _make_core(transport=transport, refresh=None) as core:
-            assert core.refresh_now() is True
+            # ``wait=False`` always returns ``None`` (no completion to
+            # report); ``wait=True`` returns ``True`` because there is
+            # nothing to wait for.
+            assert core.refresh_now() is None
             assert core.refresh_now(wait=True, timeout=0.1) is True
 
     def test_refresher_status_when_disabled(self) -> None:

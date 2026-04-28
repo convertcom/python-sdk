@@ -118,11 +118,22 @@ def test_delivery_failure_emits_event_logs_safely_and_reraises(caplog: pytest.Lo
     context = core.create_context("visitor-123", {"tier": "premium"})
     context.track_conversion("purchase")
 
+    # ``release_queues`` now raises a typed ``TrackingDeliveryError``
+    # that wraps the underlying transport exception (available via
+    # ``__cause__``) and exposes partial-success bookkeeping. The
+    # original ``RuntimeError`` is the cause; the message is privacy-
+    # safe and references the wrapped error type, not the secret.
+    from convert_sdk.errors import TrackingDeliveryError
+
     with (
         caplog.at_level("WARNING", logger="convert_sdk.tracking"),
-        pytest.raises(RuntimeError, match="network secret visitor-123"),
+        pytest.raises(TrackingDeliveryError) as excinfo,
     ):
         context.release_queues("manual-flush")
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert excinfo.value.delivered_event_count == 0
+    assert excinfo.value.delivered_batch_count == 0
+    assert excinfo.value.remaining_event_count == 1
 
     assert [payload.event for payload in captured] == [
         LifecycleEvent.QUEUE_RELEASE_STARTED,

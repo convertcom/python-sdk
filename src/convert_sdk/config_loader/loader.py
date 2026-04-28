@@ -58,6 +58,10 @@ def load_config_snapshot(config: SDKConfig, transport: Transport) -> ConfigSnaps
 
     try:
         config_data = transport.fetch_config(request)
+    except ConfigLoadError:
+        # Already typed and logged upstream; let it propagate with its
+        # original chain.
+        raise
     except Exception as exc:
         endpoint_host = _safe_hostname(config.transport.config_endpoint)
         log_diagnostic_event(
@@ -68,6 +72,10 @@ def load_config_snapshot(config: SDKConfig, transport: Transport) -> ConfigSnaps
             error_code="config.fetch_failed",
             endpoint_host=endpoint_host,
         )
+        # Chain the underlying ``httpx`` / parser error rather than
+        # ``raise ... from None`` — operators debugging an incident
+        # need the original traceback. The inner exception is not
+        # security-sensitive (no SDK key in HTTP errors).
         raise ConfigLoadError(
             "Config fetch failed; verify SDK key credentials, endpoint, and network access.",
             code="config.fetch_failed",
@@ -77,7 +85,7 @@ def load_config_snapshot(config: SDKConfig, transport: Transport) -> ConfigSnaps
                 "error_type": type(exc).__name__,
                 "has_environment": bool(config.environment),
             },
-        ) from None
+        ) from exc
 
     snapshot = _build_validated_snapshot(
         config_data,
@@ -123,6 +131,9 @@ def _build_validated_snapshot(
             error_code="config.processing_failed",
             endpoint_host=endpoint_host,
         )
+        # Chain the original exception so operators can see the
+        # underlying KeyError / TypeError / etc. The inner exception
+        # is not security-sensitive (config payload, not credentials).
         raise ConfigValidationError(
             "Config processing failed; verify the project config shape.",
             code="config.processing_failed",
@@ -131,7 +142,7 @@ def _build_validated_snapshot(
                 "endpoint_host": endpoint_host,
                 "error_type": type(exc).__name__,
             },
-        ) from None
+        ) from exc
 
 
 def _safe_hostname(url: str) -> str | None:

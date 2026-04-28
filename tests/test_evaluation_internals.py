@@ -146,12 +146,20 @@ class TestRuleMatchTypes:
             ("equals", "premium", "premium", True),
             ("equals", "premium", "free", False),
             ("matches", "10", 10, True),
+            # JS aliases ``equalsNumber`` to ``equals`` (stringified
+            # case-insensitive compare). Parity-correct behaviour is to
+            # compare the string forms — ``str(10) == str("10")`` → True;
+            # ``str(10) == str("11")`` → False.
             ("equalsNumber", 10, "10", True),
             ("equalsNumber", 10, "11", False),
             ("less", 5, 1, True),
             ("less", 5, 5, False),
             ("lessEqual", 5, 5, True),
             ("lessEqual", 5, 6, False),
+            # JS ``less``/``lessEqual`` return False on type mismatch
+            # rather than raising. Coerce-or-False mirrors that.
+            ("less", 5, "abc", False),
+            ("lessEqual", 5, "abc", False),
         ],
     )
     def test_numeric_and_equality(
@@ -192,9 +200,12 @@ class TestRuleMatchTypes:
         rules = {"key": "path", "value": r"^/api/v\d+", "matching": {"match_type": "regexMatches"}}
         assert evaluate_rules(rules, {"path": "/api/v2/users"}) is True
 
-    def test_unknown_match_type_falls_back_to_equality(self) -> None:
+    def test_unknown_match_type_returns_false(self) -> None:
+        # Parity with JS: unknown match types fall through the
+        # comparison switch and return False rather than the prior
+        # Python-only ``actual == expected`` shortcut.
         rules = {"key": "k", "value": "x", "matching": {"match_type": "garbage"}}
-        assert evaluate_rules(rules, {"k": "x"}) is True
+        assert evaluate_rules(rules, {"k": "x"}) is False
 
     def test_negated_match(self) -> None:
         rules = {
@@ -206,11 +217,19 @@ class TestRuleMatchTypes:
 
 
 class TestRuleNumericCoercion:
-    def test_to_number_handles_bool(self) -> None:
-        rules = {"key": "v", "value": 1, "matching": {"match_type": "equalsNumber"}}
-        assert evaluate_rules(rules, {"v": True}) is True
-        rules2 = {"key": "v", "value": 0, "matching": {"match_type": "equalsNumber"}}
-        assert evaluate_rules(rules2, {"v": False}) is True
+    def test_less_handles_numeric_strings(self) -> None:
+        # JS coerces numeric-looking strings via ``isNumeric`` before
+        # comparing with ``less`` / ``lessEqual``.
+        rules = {"key": "v", "value": "10", "matching": {"match_type": "less"}}
+        assert evaluate_rules(rules, {"v": "5"}) is True
+        rules2 = {"key": "v", "value": "10", "matching": {"match_type": "less"}}
+        assert evaluate_rules(rules2, {"v": "15"}) is False
+
+    def test_less_returns_false_on_non_numeric_string(self) -> None:
+        # JS returns false when one side is non-numeric rather than
+        # raising — mirror that to avoid crashing the evaluator.
+        rules = {"key": "v", "value": 10, "matching": {"match_type": "less"}}
+        assert evaluate_rules(rules, {"v": "abc"}) is False
 
 
 # ---------------------------------------------------------------------------
@@ -352,12 +371,12 @@ def _experience_snapshot(**experience_overrides: Any) -> ConfigSnapshot:
     experience: dict[str, Any] = {
         "id": "e1",
         "key": "checkout",
-        "status": "active",
+        "status": "running",
         "variations": [
             {
                 "id": "v1",
                 "key": "control",
-                "status": "active",
+                "status": "running",
                 "traffic_allocation": 100.0,
             }
         ],
@@ -379,8 +398,24 @@ class TestDiagnoseExperience:
         assert diagnostic.resolved is False
         assert diagnostic.reason == "experience_not_found"
 
-    def test_experience_inactive(self) -> None:
-        snapshot = _experience_snapshot(status="paused")
+    def test_experience_archived(self) -> None:
+        # JS rejects experiences listed in ``archived_experiences``;
+        # the parity-correct gating mechanism in Python is the same
+        # list, not a Python-only ``experience.status`` filter (which
+        # was removed for parity).
+        snapshot = _snapshot(
+            experiences=[
+                {
+                    "id": "e1",
+                    "key": "checkout",
+                    "status": "running",
+                    "variations": [
+                        {"id": "v1", "key": "control", "traffic_allocation": 100.0}
+                    ],
+                }
+            ],
+            archived_experiences=["e1"],
+        )
         diagnostic = diagnose_experience(
             snapshot,
             experience_key="checkout",
@@ -388,10 +423,12 @@ class TestDiagnoseExperience:
             visitor_attributes={},
             location_attributes={},
         )
-        assert diagnostic.reason == "experience_inactive"
+        assert diagnostic.reason == "experience_archived"
 
     def test_environment_mismatch(self) -> None:
-        snapshot = _experience_snapshot(environments=["staging"])
+        # JS reads singular ``experience.environment`` and rejects when
+        # the request environment differs.
+        snapshot = _experience_snapshot(environment="staging")
         diagnostic = diagnose_experience(
             snapshot,
             experience_key="checkout",
@@ -402,9 +439,10 @@ class TestDiagnoseExperience:
         )
         assert diagnostic.reason == "environment_mismatch"
 
-    def test_environment_match_with_empty_list_passes(self) -> None:
-        # environments=[] means "any environment"
-        snapshot = _experience_snapshot(environments=[])
+    def test_environment_unset_means_any_environment(self) -> None:
+        # JS skips the environment check when ``experience.environment``
+        # is unset — the request environment value is ignored.
+        snapshot = _experience_snapshot()
         diagnostic = diagnose_experience(
             snapshot,
             experience_key="checkout",
@@ -434,7 +472,7 @@ class TestDiagnoseExperience:
                 {
                     "id": "a1",
                     "key": "premium-only",
-                    "status": "active",
+                    "status": "running",
                     "rules": {"key": "tier", "value": "premium"},
                 }
             ],
@@ -442,7 +480,7 @@ class TestDiagnoseExperience:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "audiences": ["a1"],
                     "variations": [
                         {"id": "v1", "key": "control", "traffic_allocation": 100.0}
@@ -473,7 +511,7 @@ class TestDiagnoseExperience:
     def test_no_variation_selected_when_traffic_zero(self) -> None:
         snapshot = _experience_snapshot(
             variations=[
-                {"id": "v1", "key": "control", "status": "active", "traffic_allocation": 0.0}
+                {"id": "v1", "key": "control", "status": "running", "traffic_allocation": 0.0}
             ]
         )
         diagnostic = diagnose_experience(
@@ -513,11 +551,11 @@ class TestExperienceEvaluation:
     def test_evaluate_experiences_skips_keyless_entries(self) -> None:
         snapshot = _snapshot(
             experiences=[
-                {"id": "e0", "status": "active", "variations": []},
+                {"id": "e0", "status": "running", "variations": []},
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {"id": "v1", "key": "control", "traffic_allocation": 100.0}
                     ],
@@ -537,12 +575,12 @@ class TestExperienceEvaluation:
             audiences=[
                 {
                     "id": "a1",
-                    "status": "active",
+                    "status": "running",
                     "rules": {"key": "tier", "value": "premium"},
                 },
                 {
                     "id": "a2",
-                    "status": "active",
+                    "status": "running",
                     "rules": {"key": "country", "value": "US"},
                 },
             ],
@@ -550,7 +588,7 @@ class TestExperienceEvaluation:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "audiences": ["a1", "a2"],
                     "settings": {"matching_options": {"audiences": "all"}},
                     "variations": [
@@ -585,7 +623,7 @@ class TestExperienceEvaluation:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "audiences": ["missing"],
                     "variations": [
                         {"id": "v1", "key": "control", "traffic_allocation": 100.0}
@@ -602,14 +640,18 @@ class TestExperienceEvaluation:
         )
         assert result is None
 
-    def test_audiences_match_treats_inactive_audience_as_false(self) -> None:
+    def test_audience_status_field_is_ignored_for_parity_with_js(self) -> None:
+        # JS does not filter audiences by an opaque status field; the
+        # rules are evaluated regardless. An empty rules mapping means
+        # "all visitors qualify", so a paused-but-empty-rules audience
+        # admits everyone — matching JS behaviour.
         snapshot = _snapshot(
             audiences=[{"id": "a1", "status": "paused", "rules": {}}],
             experiences=[
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "audiences": ["a1"],
                     "variations": [
                         {"id": "v1", "key": "control", "traffic_allocation": 100.0}
@@ -624,7 +666,9 @@ class TestExperienceEvaluation:
             visitor_attributes={},
             location_attributes={},
         )
-        assert result is None
+        # Empty rules → audience qualifies → experience selects v1.
+        assert result is not None
+        assert result.variation_key == "control"
 
     def test_bucketing_options_pulled_from_snapshot(self) -> None:
         snapshot = _snapshot(
@@ -633,7 +677,7 @@ class TestExperienceEvaluation:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {"id": "v1", "key": "control", "traffic_allocation": 100.0}
                     ],
@@ -676,12 +720,12 @@ def _feature_snapshot() -> ConfigSnapshot:
             {
                 "id": "e1",
                 "key": "checkout",
-                "status": "active",
+                "status": "running",
                 "variations": [
                     {
                         "id": "v1",
                         "key": "control",
-                        "status": "active",
+                        "status": "running",
                         "traffic_allocation": 100.0,
                         "changes": [
                             {
@@ -717,6 +761,8 @@ class TestEvaluateFeature:
         assert result is None
 
     def test_returns_first_match(self) -> None:
+        # Default ``type_cast=False`` for parity with JS — variables are
+        # surfaced verbatim from the config without coercion.
         snapshot = _feature_snapshot()
         result = evaluate_feature(
             snapshot,
@@ -727,12 +773,12 @@ class TestEvaluateFeature:
         )
         assert result is not None
         assert result.feature_key == "banner"
-        assert result.variables["headline"] == "123"
-        assert result.variables["max_views"] == 10
-        assert result.variables["enabled"] is True
-        assert result.variables["config"] == {"x": 1}
+        # Raw values from the config — no Python-only coercion.
+        assert result.variables["headline"] == 123
+        assert result.variables["max_views"] == "10"
+        assert result.variables["enabled"] == "yes"
 
-    def test_type_cast_disabled_preserves_raw_values(self) -> None:
+    def test_type_cast_opt_in_coerces_variable_values(self) -> None:
         snapshot = _feature_snapshot()
         result = evaluate_feature(
             snapshot,
@@ -740,11 +786,12 @@ class TestEvaluateFeature:
             visitor_id="v1",
             visitor_attributes={},
             location_attributes={},
-            type_cast=False,
+            type_cast=True,
         )
         assert result is not None
-        assert result.variables["max_views"] == "10"
-        assert result.variables["enabled"] == "yes"
+        assert result.variables["max_views"] == 10
+        assert result.variables["enabled"] is True
+        assert result.variables["config"] == {"x": 1}
 
 
 class TestCastFeatureValueBranches:
@@ -785,12 +832,12 @@ class TestCastFeatureValueBranches:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {
                             "id": "v1",
                             "key": "control",
-                            "status": "active",
+                            "status": "running",
                             "traffic_allocation": 100.0,
                             "changes": [
                                 {
@@ -812,6 +859,7 @@ class TestCastFeatureValueBranches:
             visitor_id="v1",
             visitor_attributes={},
             location_attributes={},
+            type_cast=True,
         )
         assert result is not None
         assert result.variables[key] == expected
@@ -829,12 +877,12 @@ class TestCastFeatureValueBranches:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {
                             "id": "v1",
                             "key": "control",
-                            "status": "active",
+                            "status": "running",
                             "traffic_allocation": 100.0,
                             "changes": [
                                 {
@@ -856,6 +904,7 @@ class TestCastFeatureValueBranches:
             visitor_id="v1",
             visitor_attributes={},
             location_attributes={},
+            type_cast=True,
         )
         assert result is not None
         assert result.variables["config"] == "not-json{"
@@ -869,12 +918,12 @@ class TestEvaluateFeaturesGuards:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {
                             "id": "v1",
                             "key": "control",
-                            "status": "active",
+                            "status": "running",
                             "traffic_allocation": 100.0,
                             "changes": [
                                 {"type": "domChange", "data": {"feature_id": "f1"}},
@@ -906,12 +955,12 @@ class TestEvaluateFeaturesGuards:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {
                             "id": "v1",
                             "key": "control",
-                            "status": "active",
+                            "status": "running",
                             "traffic_allocation": 100.0,
                             "changes": [
                                 {"type": "fullStackFeature", "data": "not-mapping"},
@@ -967,12 +1016,12 @@ class TestDiagnoseFeature:
                 {
                     "id": "e1",
                     "key": "checkout",
-                    "status": "active",
+                    "status": "running",
                     "variations": [
                         {
                             "id": "v1",
                             "key": "control",
-                            "status": "active",
+                            "status": "running",
                             "traffic_allocation": 100.0,
                             "changes": [],
                         }
@@ -1014,7 +1063,7 @@ class TestBucketingStatusFilter:
         # raising and still allocate to the running variation.
         variations = (
             {"id": "v0", "key": "junk", "status": "archived", "traffic_allocation": 100.0},
-            {"id": "v1", "key": "control", "status": "active", "traffic_allocation": 100.0},
+            {"id": "v1", "key": "control", "status": "running", "traffic_allocation": 100.0},
         )
         bucketed = bucketing_mod.select_variation(
             variations,
@@ -1025,3 +1074,348 @@ class TestBucketingStatusFilter:
         assert bucketed is not None
         variation, _ = bucketed
         assert variation["key"] == "control"
+
+    def test_missing_traffic_allocation_defaults_to_full_traffic(self) -> None:
+        # JS treats a missing ``traffic_allocation`` as 100% (parity
+        # behaviour). With the JS-aligned fix, a single variation with
+        # no allocation receives the full bucket range.
+        variations = (
+            {"id": "v1", "key": "control", "status": "running"},
+        )
+        bucketed = bucketing_mod.select_variation(
+            variations,
+            visitor_id="visitor-x",
+            experience_id="e1",
+            bucketing_config=None,
+        )
+        assert bucketed is not None
+        variation, _ = bucketed
+        assert variation["key"] == "control"
+
+    def test_non_numeric_traffic_allocation_is_treated_as_zero(self) -> None:
+        # JS ``Number()`` coerces non-numeric to NaN and the comparison
+        # returns false (the variation is skipped). Python mirrors with
+        # 0%, so this single-variation experience produces no match.
+        variations = (
+            {
+                "id": "v1",
+                "key": "control",
+                "status": "running",
+                "traffic_allocation": "not-a-number",
+            },
+        )
+        bucketed = bucketing_mod.select_variation(
+            variations,
+            visitor_id="visitor-x",
+            experience_id="e1",
+            bucketing_config=None,
+        )
+        assert bucketed is None
+
+
+# ---------------------------------------------------------------------------
+# rules.py — JS-parity coverage for the new operator paths
+# ---------------------------------------------------------------------------
+
+
+class TestRuleParityBranches:
+    def test_equals_array_value_uses_indexof_semantics(self) -> None:
+        # JS ``equals`` for an array value returns ``testAgainst in array``.
+        rules = {"key": "tags", "value": "vip", "matching": {"match_type": "equals"}}
+        assert evaluate_rules(rules, {"tags": ["free", "vip", "trial"]}) is True
+        assert evaluate_rules(rules, {"tags": ["free", "trial"]}) is False
+
+    def test_equals_array_falls_back_to_string_form(self) -> None:
+        # JS ``equals`` short-circuits on identity match; Python's
+        # parity layer also accepts a stringified-element match so a
+        # numeric ``testAgainst`` finds its string twin in the array.
+        rules = {"key": "ids", "value": 42, "matching": {"match_type": "equals"}}
+        assert evaluate_rules(rules, {"ids": ["1", "42", "100"]}) is True
+
+    def test_equals_non_empty_mapping_checks_keys(self) -> None:
+        # JS ``equals`` for a mapping returns ``str(testAgainst) in keys``.
+        rules = {
+            "key": "feature_flags",
+            "value": "checkout",
+            "matching": {"match_type": "equals"},
+        }
+        assert evaluate_rules(rules, {"feature_flags": {"checkout": True}}) is True
+        assert evaluate_rules(rules, {"feature_flags": {"home": True}}) is False
+
+    def test_equals_is_case_insensitive(self) -> None:
+        rules = {"key": "tier", "value": "Premium", "matching": {"match_type": "equals"}}
+        assert evaluate_rules(rules, {"tier": "PREMIUM"}) is True
+
+    def test_contains_lowercases_both_sides(self) -> None:
+        rules = {"key": "path", "value": "CHECKOUT", "matching": {"match_type": "contains"}}
+        assert evaluate_rules(rules, {"path": "/Checkout/cart"}) is True
+
+    def test_contains_returns_true_for_whitespace_only_test_against(self) -> None:
+        # JS ``contains`` short-circuits when ``testAgainst`` is empty
+        # or whitespace-only after trimming.
+        rules = {"key": "path", "value": "   ", "matching": {"match_type": "contains"}}
+        assert evaluate_rules(rules, {"path": "/anything"}) is True
+
+    def test_starts_and_ends_with_lowercase_both_sides(self) -> None:
+        starts = {"key": "path", "value": "/API", "matching": {"match_type": "startsWith"}}
+        ends = {"key": "path", "value": ".HTML", "matching": {"match_type": "endsWith"}}
+        assert evaluate_rules(starts, {"path": "/api/v2"}) is True
+        assert evaluate_rules(ends, {"path": "/index.html"}) is True
+
+    def test_regex_matches_is_case_insensitive(self) -> None:
+        rules = {
+            "key": "path",
+            "value": r"^/API/V\d+",
+            "matching": {"match_type": "regexMatches"},
+        }
+        assert evaluate_rules(rules, {"path": "/api/v2/users"}) is True
+
+    def test_regex_matches_returns_false_on_malformed_pattern(self) -> None:
+        # JS would throw at ``new RegExp`` time and the rule manager
+        # would catch upstream. Python mirrors with safe-false here so
+        # one bad rule does not crash the whole evaluation.
+        rules = {
+            "key": "path",
+            "value": "[unterminated",
+            "matching": {"match_type": "regexMatches"},
+        }
+        assert evaluate_rules(rules, {"path": "/anything"}) is False
+
+    def test_is_in_splits_on_pipe_and_lowercases_test_against(self) -> None:
+        rules = {
+            "key": "country",
+            "value": "us|UK|de",
+            "matching": {"match_type": "isIn"},
+        }
+        assert evaluate_rules(rules, {"country": "uk"}) is True
+        assert evaluate_rules(rules, {"country": "FR"}) is False
+
+    def test_is_in_accepts_list_test_against(self) -> None:
+        rules = {
+            "key": "country",
+            "value": ["us", "UK"],
+            "matching": {"match_type": "isIn"},
+        }
+        assert evaluate_rules(rules, {"country": "uk"}) is True
+
+    def test_is_in_with_unsupported_test_against_returns_false(self) -> None:
+        # ``test_against`` is neither list/tuple nor string → no
+        # candidates → no match.
+        rules = {"key": "country", "value": 42, "matching": {"match_type": "isIn"}}
+        assert evaluate_rules(rules, {"country": "fr"}) is False
+
+    def test_coerce_numeric_handles_empty_and_non_numeric_strings(self) -> None:
+        # ``less`` must return False when either side is non-coercible.
+        empty_rule = {"key": "v", "value": 5, "matching": {"match_type": "less"}}
+        assert evaluate_rules(empty_rule, {"v": "   "}) is False
+        non_numeric = {"key": "v", "value": 5, "matching": {"match_type": "lessEqual"}}
+        assert evaluate_rules(non_numeric, {"v": "abc"}) is False
+
+    def test_coerce_numeric_handles_unsupported_type(self) -> None:
+        # An object value falls through ``_coerce_numeric`` to ``None``
+        # and ``less`` returns False.
+        rule = {"key": "v", "value": 5, "matching": {"match_type": "less"}}
+        assert evaluate_rules(rule, {"v": {"unexpected": "shape"}}) is False
+
+
+# ---------------------------------------------------------------------------
+# experiences.py — archived_experiences support (singular + mapping forms)
+# ---------------------------------------------------------------------------
+
+
+class TestArchivedExperiences:
+    def test_archived_list_form_rejects_listed_id(self) -> None:
+        snapshot = _snapshot(
+            experiences=[
+                {
+                    "id": "e1",
+                    "key": "checkout",
+                    "variations": [
+                        {"id": "v1", "key": "control", "traffic_allocation": 100.0}
+                    ],
+                }
+            ],
+            archived_experiences=["e1"],
+        )
+        result = evaluate_experience(
+            snapshot,
+            experience_key="checkout",
+            visitor_id="v1",
+            visitor_attributes={},
+            location_attributes={},
+        )
+        assert result is None
+
+    def test_archived_mapping_form_uses_values(self) -> None:
+        # JS ``getEntitiesList`` accepts both list and dict shapes; the
+        # Python parity helper iterates ``.values()`` for mappings.
+        snapshot = _snapshot(
+            experiences=[
+                {
+                    "id": "e1",
+                    "key": "checkout",
+                    "variations": [
+                        {"id": "v1", "key": "control", "traffic_allocation": 100.0}
+                    ],
+                }
+            ],
+            archived_experiences={"by-id": "e1"},
+        )
+        result = evaluate_experience(
+            snapshot,
+            experience_key="checkout",
+            visitor_id="v1",
+            visitor_attributes={},
+            location_attributes={},
+        )
+        assert result is None
+
+    def test_malformed_archived_field_is_ignored(self) -> None:
+        # An int (non-iterable) for ``archived_experiences`` should not
+        # crash evaluation — the helper returns False and bucketing
+        # proceeds normally.
+        snapshot = _snapshot(
+            experiences=[
+                {
+                    "id": "e1",
+                    "key": "checkout",
+                    "variations": [
+                        {"id": "v1", "key": "control", "traffic_allocation": 100.0}
+                    ],
+                }
+            ],
+            archived_experiences=42,
+        )
+        result = evaluate_experience(
+            snapshot,
+            experience_key="checkout",
+            visitor_id="v1",
+            visitor_attributes={},
+            location_attributes={},
+        )
+        assert result is not None
+        assert result.variation_key == "control"
+
+    def test_archived_check_skipped_when_experience_has_no_id(self) -> None:
+        # An experience with no ``id`` cannot match the archived list,
+        # so the helper short-circuits to False.
+        snapshot = _snapshot(
+            experiences=[
+                {
+                    "key": "checkout",
+                    "variations": [
+                        {"id": "v1", "key": "control", "traffic_allocation": 100.0}
+                    ],
+                }
+            ],
+            archived_experiences=["whatever"],
+        )
+        result = evaluate_experience(
+            snapshot,
+            experience_key="checkout",
+            visitor_id="v1",
+            visitor_attributes={},
+            location_attributes={},
+        )
+        assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# features.py — type_cast safe-fallback paths
+# ---------------------------------------------------------------------------
+
+
+class TestCastFeatureSafeFallback:
+    def test_invalid_integer_returns_frozen_original(self) -> None:
+        # ``int("1.5")`` raises ``ValueError``; with the safe fallback
+        # the variable is surfaced as the frozen original instead of
+        # crashing the whole ``evaluate_features`` call.
+        snapshot = _snapshot(
+            features=[
+                {
+                    "id": "f1",
+                    "key": "banner",
+                    "variables": [{"key": "max_views", "type": "integer"}],
+                }
+            ],
+            experiences=[
+                {
+                    "id": "e1",
+                    "key": "checkout",
+                    "status": "running",
+                    "variations": [
+                        {
+                            "id": "v1",
+                            "key": "control",
+                            "status": "running",
+                            "traffic_allocation": 100.0,
+                            "changes": [
+                                {
+                                    "type": "fullStackFeature",
+                                    "data": {
+                                        "feature_id": "f1",
+                                        "variables_data": {"max_views": "1.5"},
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+        result = evaluate_feature(
+            snapshot,
+            feature_key="banner",
+            visitor_id="v1",
+            visitor_attributes={},
+            location_attributes={},
+            type_cast=True,
+        )
+        assert result is not None
+        # Falls back to the frozen original string rather than raising.
+        assert result.variables["max_views"] == "1.5"
+
+    def test_string_cast_handles_none(self) -> None:
+        snapshot = _snapshot(
+            features=[
+                {
+                    "id": "f1",
+                    "key": "banner",
+                    "variables": [{"key": "headline", "type": "string"}],
+                }
+            ],
+            experiences=[
+                {
+                    "id": "e1",
+                    "key": "checkout",
+                    "status": "running",
+                    "variations": [
+                        {
+                            "id": "v1",
+                            "key": "control",
+                            "status": "running",
+                            "traffic_allocation": 100.0,
+                            "changes": [
+                                {
+                                    "type": "fullStackFeature",
+                                    "data": {
+                                        "feature_id": "f1",
+                                        "variables_data": {"headline": None},
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+        result = evaluate_feature(
+            snapshot,
+            feature_key="banner",
+            visitor_id="v1",
+            visitor_attributes={},
+            location_attributes={},
+            type_cast=True,
+        )
+        assert result is not None
+        assert result.variables["headline"] == ""

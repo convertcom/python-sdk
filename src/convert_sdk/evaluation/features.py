@@ -24,7 +24,7 @@ def evaluate_feature(
     visitor_attributes: Mapping[str, Any],
     location_attributes: Mapping[str, Any],
     environment: str | None = None,
-    type_cast: bool = True,
+    type_cast: bool = False,
 ) -> FeatureResult | None:
     """Return the first applicable feature result for a feature key."""
 
@@ -48,7 +48,7 @@ def diagnose_feature(
     visitor_attributes: Mapping[str, Any],
     location_attributes: Mapping[str, Any],
     environment: str | None = None,
-    type_cast: bool = True,
+    type_cast: bool = False,
 ) -> FeatureDiagnostic:
     """Return a typed diagnostic outcome for a single feature request."""
 
@@ -128,7 +128,7 @@ def evaluate_features(
     visitor_attributes: Mapping[str, Any],
     location_attributes: Mapping[str, Any],
     environment: str | None = None,
-    type_cast: bool = True,
+    type_cast: bool = False,
     feature_keys: Sequence[str] | None = None,
 ) -> list[FeatureResult]:
     """Return all applicable feature results from the selected variations."""
@@ -225,6 +225,16 @@ def _cast_variables(
 
 
 def _cast_feature_value(value: Any, variable_type: str) -> Any:
+    """Coerce a feature variable value to the declared type.
+
+    This Python-only convenience is opt-in (``type_cast=True``); the
+    default is ``False`` so the surface matches the JS SDK, which
+    surfaces variables verbatim from the config. When opt-in, casts are
+    permissive: malformed input falls back to the frozen original value
+    rather than raising — a single bad ``"1.5"`` for an integer-typed
+    variable should not crash the whole ``evaluate_features`` call.
+    """
+
     normalized_type = variable_type.lower()
     if normalized_type == "boolean":
         if isinstance(value, bool):
@@ -233,9 +243,12 @@ def _cast_feature_value(value: Any, variable_type: str) -> Any:
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
     if normalized_type == "integer":
-        return int(value)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return freeze_value(value)
     if normalized_type == "string":
-        return str(value)
+        return str(value) if value is not None else ""
     if normalized_type == "json":
         if isinstance(value, str):
             try:

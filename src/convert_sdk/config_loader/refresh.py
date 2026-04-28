@@ -32,9 +32,9 @@ import logging
 import os
 import random
 import threading
-import time
 import weakref
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from ..config import RefreshConfig, SDKConfig
@@ -55,15 +55,19 @@ _logger = logging.getLogger(REFRESH_LOGGER_NAME)
 
 @dataclass(frozen=True)
 class RefresherStatus:
-    """Read-only snapshot of refresh-worker state for host observability."""
+    """Read-only snapshot of refresh-worker state for host observability.
+
+    Timestamps are timezone-aware ``datetime`` instances (UTC) to align
+    with the rest of the public API (``LifecycleEventPayload.occurred_at``).
+    """
 
     enabled: bool
     is_running: bool
     consecutive_failures: int
-    last_refresh_at: Optional[float]
-    last_success_at: Optional[float]
+    last_refresh_at: Optional[datetime]
+    last_success_at: Optional[datetime]
     last_error_type: Optional[str]
-    last_error_at: Optional[float]
+    last_error_at: Optional[datetime]
     forked_in_child: bool
     terminal_failure: bool
 
@@ -110,10 +114,10 @@ class ConfigRefresher:
         self._thread: Optional[threading.Thread] = None
         self._started = False
 
-        self._last_refresh_at: Optional[float] = None
-        self._last_success_at: Optional[float] = None
+        self._last_refresh_at: Optional[datetime] = None
+        self._last_success_at: Optional[datetime] = None
         self._last_error_type: Optional[str] = None
-        self._last_error_at: Optional[float] = None
+        self._last_error_at: Optional[datetime] = None
         self._forked_in_child = False
         self._terminal_failure = False
 
@@ -199,7 +203,12 @@ class ConfigRefresher:
                 if self._stop_event.is_set():
                     return
                 self._do_refresh()
-        except Exception as exc:
+        except BaseException as exc:
+            # Catch ``BaseException`` (not just ``Exception``) so a
+            # logging filter that calls ``sys.exit``, a worker-thread
+            # ``KeyboardInterrupt``, or any other non-Exception escape
+            # cannot kill the daemon thread silently — exactly the
+            # failure mode the comment above promises to prevent.
             log_diagnostic_event(
                 "refresh.worker_crashed",
                 level=logging.ERROR,
@@ -211,7 +220,9 @@ class ConfigRefresher:
                 type(exc).__name__,
             )
             # Unblock anyone awaiting wait_for_next_refresh so they don't
-            # hang forever on a worker that has just exited.
+            # hang forever on a worker that has just exited. Do not
+            # re-raise: a daemon thread crashing should not bring down
+            # the host process.
             self._refresh_completed.set()
 
     def _do_refresh(self) -> None:
@@ -225,7 +236,7 @@ class ConfigRefresher:
             source=source,
             consecutive_failures=self._consecutive_failures,
         )
-        self._last_refresh_at = time.time()
+        self._last_refresh_at = datetime.now(timezone.utc)
         try:
             new_snapshot = load_config_snapshot(self._config, transport=self._transport)
         except ConfigValidationError as exc:
@@ -248,7 +259,7 @@ class ConfigRefresher:
                 consecutive_failures=self._consecutive_failures,
             )
             self._consecutive_failures = 0
-            self._last_success_at = time.time()
+            self._last_success_at = datetime.now(timezone.utc)
             self._refresh_completed.set()
             return
 
@@ -263,7 +274,7 @@ class ConfigRefresher:
             return
 
         self._consecutive_failures = 0
-        self._last_success_at = time.time()
+        self._last_success_at = datetime.now(timezone.utc)
         log_diagnostic_event(
             "refresh.success",
             source=source,
@@ -280,7 +291,7 @@ class ConfigRefresher:
     ) -> None:
         self._consecutive_failures += 1
         self._last_error_type = type(exc).__name__
-        self._last_error_at = time.time()
+        self._last_error_at = datetime.now(timezone.utc)
         at_terminal_backoff = (
             self._compute_backoff_seconds() >= self._policy.backoff_max_seconds
         )
@@ -310,7 +321,7 @@ class ConfigRefresher:
         # waiter on wait_for_next_refresh sees _refresh_completed set.
         self._consecutive_failures += 1
         self._last_error_type = type(exc).__name__
-        self._last_error_at = time.time()
+        self._last_error_at = datetime.now(timezone.utc)
         self._terminal_failure = True
         log_diagnostic_event(
             "refresh.terminal_failure",

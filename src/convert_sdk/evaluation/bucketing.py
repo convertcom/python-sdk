@@ -101,11 +101,29 @@ def select_variation(
 
     cumulative = 0.0
     for variation in variations:
+        # JS treats only ``status === 'running'`` as eligible
+        # (``VariationStatuses`` enum is ``'stopped' | 'running'``). When
+        # ``status`` is absent, JS defaults to running. Mirror that
+        # exactly — accepting "active" admitted variations JS would skip.
         status = variation.get("status")
-        if status not in (None, "", "active", "running"):
+        if status not in (None, "", "running"):
             continue
 
-        allocation = float(variation.get("traffic_allocation", 0.0))
+        # JS ``data-manager.ts`` treats a missing ``traffic_allocation``
+        # as 100% (``allocation ?? 100``). Python previously defaulted
+        # to 0, which silently excluded any variation whose allocation
+        # was unset. Use a sentinel to distinguish missing-vs-zero.
+        raw_allocation = variation.get("traffic_allocation")
+        if raw_allocation is None:
+            allocation = 100.0
+        else:
+            try:
+                allocation = float(raw_allocation)
+            except (TypeError, ValueError):
+                # JS ``Number()`` coerces non-numeric to NaN and the
+                # subsequent comparisons return false; we mirror with
+                # 0 so the variation is effectively skipped.
+                allocation = 0.0
         cumulative += allocation * 100
         if bucket_value < cumulative:
             return variation, bucket_value
