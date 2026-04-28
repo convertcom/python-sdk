@@ -23,6 +23,13 @@ usage, operational concerns, and migration from other integration styles.
 | [Migrating from raw REST](migration-from-rest.md) | Teams currently calling the Convert config and tracking endpoints directly |
 | [Migrating from the JavaScript SDK](migration-from-javascript.md) | Teams porting JS backend code or sharing mental models with a JS front end |
 
+## Looking ahead
+
+| Guide | What it covers |
+|-------|----------------|
+| [Roadmap](roadmap.md) | What is shipped, what is planned, and the phase boundaries |
+| [Async and framework integrations](async.md) | Phase 3 design intent for `AsyncCore` / `AsyncContext` and the planned `convert-sdk-django` / `convert-sdk-fastapi` / `convert-sdk-flask` distributions |
+
 ## Public API quick-reference
 
 All symbols are importable from `convert_sdk`:

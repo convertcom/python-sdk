@@ -232,3 +232,4 @@ def make_test_core(config_payload):
 - [Initialization](initialization.md) — `SDKConfig`, `TransportConfig`, `TrackingConfig`
 - [Queue control](queue-control.md) — lifecycle events as an alternative to subclassing
 - [Debugging](debugging.md) — diagnostic logging configuration
+- [Async and framework integrations](async.md) — how the same Protocol surfaces extend to the planned async API

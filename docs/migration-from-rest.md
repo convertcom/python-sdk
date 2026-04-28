@@ -211,9 +211,20 @@ core = Core(SDKConfig(config_data=project_config, environment="production"))
 
 See [Initialization](initialization.md) for the full `SDKConfig` reference.
 
+## Future async / framework support
+
+The MVP is sync-first. An async public API (`AsyncCore` / `AsyncContext`)
+and framework-specific helpers (`convert-sdk-django`,
+`convert-sdk-fastapi`, `convert-sdk-flask`) are planned for Phase 3.
+If you are migrating from REST today and your service is already async
+(`asyncio` / `httpx.AsyncClient`), you can call the sync SDK from
+async code via `asyncio.to_thread()` until the async surface ships;
+see [Async and framework integrations](async.md) for the design intent.
+
 ## What to read next
 
 - [Initialization](initialization.md) — SDK key and direct config options
 - [Evaluation](evaluation.md) — how the SDK replaces manual bucketing
 - [Tracking](tracking.md) — conversion payload details and dedup rules
 - [Queue control](queue-control.md) — flushing and batching configuration
+- [Roadmap](roadmap.md) — what is shipped, what is planned
