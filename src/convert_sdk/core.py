@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from types import TracebackType
 from typing import Any, Mapping, Optional, Type
@@ -11,7 +12,7 @@ from .adapters.storage.in_memory import InMemoryDataStore
 from .adapters.transport.httpx_transport import HttpxTransport
 from .config import SDKConfig
 from .config_loader.loader import load_config_snapshot
-from .config_loader.refresh import ConfigRefresher
+from .config_loader.refresh import ConfigRefresher, RefresherStatus
 from .diagnostics import config_source, log_diagnostic_event, snapshot_entity_counts
 from .context import Context
 from .domain.config_snapshot import ConfigSnapshot
@@ -100,13 +101,25 @@ class Core:
                 reason="direct_config_no_remote_endpoint",
             )
             return
-        self._refresher = ConfigRefresher(
-            self._config,
-            transport=self._transport,
-            apply_snapshot=self._apply_refreshed_snapshot,
-            current_snapshot=lambda: self._snapshot,
-        )
-        self._refresher.start()
+        try:
+            self._refresher = ConfigRefresher(
+                self._config,
+                transport=self._transport,
+                apply_snapshot=self._apply_refreshed_snapshot,
+                current_snapshot=lambda: self._snapshot,
+            )
+            self._refresher.start()
+        except Exception:
+            # If the refresher fails to start (thread creation refused,
+            # fork-hook registration failure on a restricted runtime),
+            # release transport resources we already opened. Without
+            # this, the constructor leaks an open transport.
+            self._refresher = None
+            close = getattr(self._transport, "close", None)
+            if callable(close):
+                with contextlib.suppress(Exception):
+                    close()
+            raise
 
     def _apply_refreshed_snapshot(self, snapshot: ConfigSnapshot) -> None:
         # Order matters: refresh the tracking queue's ids first so a reader
@@ -164,15 +177,57 @@ class Core:
 
         self._event_bus.unsubscribe(LifecycleEvent(event), handler)
 
-    def refresh_now(self) -> None:
-        """Trigger an immediate config refresh attempt (no-op if disabled)."""
+    def refresh_now(self, *, wait: bool = False, timeout: float = 5.0) -> bool:
+        """Trigger an immediate config refresh attempt.
+
+        With ``wait=False`` (the default), returns immediately after waking
+        the worker. With ``wait=True``, blocks until the next refresh
+        attempt completes (success, snapshot-unchanged skip, transient
+        failure, or terminal failure) or ``timeout`` seconds elapse, and
+        returns whether the attempt completed in time.
+
+        Returns ``True`` and is a no-op if refresh is disabled — there is
+        nothing to wait for.
+        """
 
         if self._refresher is None:
-            return
+            return True
         self._refresher.trigger_now()
+        if not wait:
+            return True
+        return self._refresher.wait_for_next_refresh(timeout)
 
-    def close(self) -> None:
+    @property
+    def refresher_status(self) -> RefresherStatus:
+        """Return a read-only snapshot of refresh-worker state.
+
+        When ``SDKConfig.refresh=None`` (refresh disabled), the returned
+        status carries ``enabled=False`` and ``is_running=False`` with all
+        timestamp fields ``None``.
+        """
+
+        if self._refresher is None:
+            return RefresherStatus(
+                enabled=False,
+                is_running=False,
+                consecutive_failures=0,
+                last_refresh_at=None,
+                last_success_at=None,
+                last_error_type=None,
+                last_error_at=None,
+                forked_in_child=False,
+                terminal_failure=False,
+            )
+        return self._refresher.status()
+
+    def close(self, *, flush: bool = True, flush_reason: str = "core_close") -> None:
         """Stop background workers and release transport resources.
+
+        With ``flush=True`` (the default), queued tracking events are
+        delivered through the transport before workers stop. Pass
+        ``flush=False`` to drop pending events instead — typically only
+        appropriate during error-path teardown where the transport is
+        already known to be unhealthy.
 
         Safe to call multiple times. After ``close()`` the SDK instance
         should not be reused: existing ``Context`` objects retain the
@@ -183,6 +238,16 @@ class Core:
         if self._closed:
             return
         self._closed = True
+        if flush and self._tracking_queue is not None:
+            try:
+                self._tracking_queue.release(reason=flush_reason)
+            except Exception:
+                # Flush is best-effort during shutdown; a transport
+                # failure here must not prevent worker teardown.
+                _logger = logging.getLogger("convert_sdk")
+                _logger.exception(
+                    "tracking flush failed during Core.close(); continuing teardown",
+                )
         if self._refresher is not None:
             self._refresher.stop()
             self._refresher = None

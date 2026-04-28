@@ -189,6 +189,11 @@ class TrackingQueue:
                 if not self._pending:
                     break
                 batch = tuple(self._pending[: self._tracking_config.batch_size])
+                # Read account/project ids together with the batch under
+                # the same lock so a concurrent update_snapshot_metadata
+                # call cannot expose half-updated ids on the request.
+                account_id = self._account_id
+                project_id = self._project_id
 
             payload = serialize_tracking_payload(
                 batch,
@@ -200,8 +205,8 @@ class TrackingQueue:
                     TrackingRequest(
                         sdk_key=self._sdk_key,
                         sdk_key_secret=self._sdk_key_secret,
-                        account_id=self._account_id,
-                        project_id=self._project_id,
+                        account_id=account_id,
+                        project_id=project_id,
                         payload=payload,
                         transport=self._transport_config,
                     )

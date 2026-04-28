@@ -182,15 +182,18 @@ core = Core(
 - Each successful refresh that produces a different snapshot replaces
   `core.snapshot` through a single attribute swap. In-flight evaluations
   see either the old or new snapshot, never a partial state.
-- Refresh attempts produce one of four diagnostic events on the
+- Refresh attempts produce diagnostic events on the
   `convert_sdk.diagnostics` logger:
 
-  | Event              | Meaning                                              |
-  |--------------------|------------------------------------------------------|
-  | `refresh.start`    | A refresh attempt is beginning.                      |
-  | `refresh.success`  | Fetch succeeded and the snapshot changed.            |
-  | `refresh.skipped`  | Fetch succeeded but the snapshot is unchanged.       |
-  | `refresh.fail`     | Fetch raised. Includes `consecutive_failures`.       |
+  | Event                       | Meaning                                                                               |
+  |-----------------------------|---------------------------------------------------------------------------------------|
+  | `refresh.start`             | A refresh attempt is beginning.                                                       |
+  | `refresh.success`           | Fetch succeeded and the snapshot changed.                                             |
+  | `refresh.skipped`           | Fetch succeeded but the snapshot is unchanged (or skipped for another stated reason). |
+  | `refresh.fail`              | Transient failure. Includes `consecutive_failures` and `at_terminal_backoff`.         |
+  | `refresh.terminal_failure`  | Terminal condition (bad upstream payload or apply-callback bug). Worker stops.        |
+  | `refresh.fork_detected`     | The refresher detected an `os.fork()` in a child process; the worker is dead there.   |
+  | `refresh.worker_crashed`    | An unexpected exception escaped the worker loop's own handler. Worker exits.          |
 
 - Each successful refresh that produces a different snapshot also fires
   the `LifecycleEvent.CONFIG_UPDATED` lifecycle event with `account_id`,
@@ -202,15 +205,42 @@ core = Core(
 
 ### Failure handling
 
-- Transient transport failures back off exponentially up to
-  `backoff_max_seconds` and retry; the worker never gives up.
-- Optional `RefreshConfig.on_terminal_failure` callback fires once per
-  failure once the consecutive-failure count hits the backoff cap. Use
-  it to surface a typed alert through your application's logger or
-  metrics pipeline. Exceptions raised inside the callback are caught
-  and logged on `convert_sdk.refresh`; they never crash the worker.
+- **Transient transport failures** back off exponentially up to
+  `backoff_max_seconds` and retry; the worker keeps retrying because
+  silently freezing on stale config is worse than periodic retries.
+  `on_terminal_failure` fires once per failure once the consecutive-
+  failure count reaches the backoff cap.
+- **Terminal failures** stop the worker. Two conditions count as terminal:
+  (a) the upstream returned a structurally invalid payload
+  (`ConfigValidationError`) — retrying the same broken response is
+  futile; (b) the SDK's internal apply step raised, which indicates a
+  programmer bug rather than a transient condition. In both cases
+  `on_terminal_failure` fires once and the daemon thread exits;
+  `core.refresher_status.is_running` flips to `False` and
+  `terminal_failure` to `True`. Recovery requires recreating `Core`.
+- `RefreshConfig.on_terminal_failure` is optional. Use it to surface a
+  typed alert through your application's logger or metrics pipeline.
+  Exceptions raised inside the callback are caught and logged on
+  `convert_sdk.refresh`; they never crash the worker.
 - Background failures **never** raise into the host process. The
   worker thread is daemon-mode, so it does not block process exit.
+
+### Validation rules for `RefreshConfig`
+
+`RefreshConfig.__post_init__` rejects misconfigurations at construction
+time so the worker is never started in a degenerate state:
+
+- `interval_seconds > 0`
+- `0 ≤ jitter_seconds ≤ interval_seconds`
+- `backoff_initial_seconds > 0`
+- `backoff_max_seconds > backoff_initial_seconds` (strict — equality
+  would fire the terminal callback on the very first failure)
+- `backoff_factor > 1.0` (strict — factor=1.0 would mean the backoff
+  cap is unreachable, so the terminal callback could never fire)
+
+Invalid policies raise `ConfigValidationError` with a `code` of
+`refresh.invalid_interval`, `refresh.invalid_jitter`, or
+`refresh.invalid_backoff`.
 
 ### Long-lived `Context` objects and refresh
 
@@ -238,9 +268,37 @@ it through `core.create_context(...)` after the refresh has happened.
 ### Manual refresh
 
 Call `core.refresh_now()` to wake the worker and trigger an attempt
-immediately, regardless of the configured interval. This is useful in
-tests or for manual operational interventions. The call returns
-immediately; observe the resulting snapshot through `core.snapshot`.
+immediately, regardless of the configured interval:
+
+```python
+core.refresh_now()                       # fire-and-forget
+ok = core.refresh_now(wait=True)         # block until the next attempt finishes
+ok = core.refresh_now(wait=True, timeout=10.0)  # custom timeout in seconds
+```
+
+`wait=True` returns `True` if the next refresh attempt completed
+(success, snapshot-unchanged skip, transient failure, or terminal
+failure) within `timeout` seconds, and `False` if it timed out. With
+refresh disabled (`SDKConfig.refresh=None`) `refresh_now()` is a no-op
+and returns `True`.
+
+### Refresher observability
+
+`core.refresher_status` returns a `RefresherStatus` snapshot for use in
+operational metrics, health checks, or readiness probes:
+
+```python
+status = core.refresher_status
+status.enabled              # False when SDKConfig.refresh is None
+status.is_running           # False after stop, fork, terminal failure, or crash
+status.consecutive_failures # 0 on success/skip; resets on success
+status.last_refresh_at      # POSIX time of the last attempt (or None)
+status.last_success_at      # POSIX time of the last refresh that produced or matched a snapshot
+status.last_error_type      # exception class name of the last failure (or None)
+status.last_error_at        # POSIX time of the last failure (or None)
+status.forked_in_child      # True after the SDK detects an os.fork() in this process
+status.terminal_failure     # True after a terminal-failure shutdown
+```
 
 ### Direct-config mode
 

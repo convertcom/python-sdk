@@ -298,19 +298,24 @@ class TestFailureHandling:
             fetch_error=RuntimeError("persistent"),
             error_starts_at_call=2,
         )
+        # Tight backoff math under the strict-validation rules: initial=1,
+        # factor=2, max=2 → failure 1 raw=1 (< cap), failure 2 raw=2 (= cap).
+        # The terminal callback fires on the second failure.
         policy = RefreshConfig(
             interval_seconds=3600.0,
             jitter_seconds=0.0,
-            backoff_initial_seconds=10.0,  # already at cap on first failure
-            backoff_max_seconds=10.0,
+            backoff_initial_seconds=1.0,
+            backoff_factor=2.0,
+            backoff_max_seconds=2.0,
             on_terminal_failure=raising_callback,
         )
 
         caplog.set_level(logging.ERROR, logger="convert_sdk.refresh")
         with _make_core(transport=transport, refresh=policy) as core:
             assert core._refresher is not None
-            core.refresh_now()
-            assert core._refresher.wait_for_next_refresh(timeout=2.0)
+            for _ in range(2):
+                core.refresh_now()
+                assert core._refresher.wait_for_next_refresh(timeout=2.0)
             # Worker stayed alive despite the misbehaving callback.
             assert core._refresher.is_running
 
@@ -640,8 +645,17 @@ class TestRefreshConfigValidation:
                 {"backoff_initial_seconds": 60.0, "backoff_max_seconds": 30.0},
                 "refresh.invalid_backoff",
             ),
+            # max == initial would fire the terminal callback on the very
+            # first failure — strict inequality required.
+            (
+                {"backoff_initial_seconds": 30.0, "backoff_max_seconds": 30.0},
+                "refresh.invalid_backoff",
+            ),
             ({"backoff_factor": 0.5}, "refresh.invalid_backoff"),
             ({"backoff_factor": 0.0}, "refresh.invalid_backoff"),
+            # factor == 1.0 makes the backoff cap unreachable, so the
+            # terminal callback could never fire — strict inequality required.
+            ({"backoff_factor": 1.0}, "refresh.invalid_backoff"),
         ],
     )
     def test_invalid_policy_is_rejected_at_construction(
@@ -710,3 +724,311 @@ class TestWorkerResilience:
 
         events = [record.__dict__.get("sdk_event") for record in caplog.records]
         assert "refresh.worker_crashed" in events
+
+
+# ---------------------------------------------------------------------------
+# Terminal-failure semantics for ConfigValidationError and apply errors
+# ---------------------------------------------------------------------------
+
+
+class TestTerminalFailures:
+    def test_config_validation_error_stops_worker_and_fires_callback(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        seen: list[Exception] = []
+
+        # First fetch succeeds; subsequent fetches return a structurally
+        # broken payload so the loader raises ConfigValidationError on
+        # the refresh tick rather than ConfigLoadError.
+        broken_payload: dict[str, Any] = {
+            "account_id": "1001",
+            # Missing project.id triggers normaliser/validator rejection.
+            "project": {"name": "Demo"},
+            "experiences": [],
+            "features": [],
+            "audiences": [],
+            "segments": [],
+            "goals": [],
+        }
+        transport = RecordingTransport(payloads=[_base_config_payload(), broken_payload])
+        policy = RefreshConfig(
+            interval_seconds=3600.0,
+            jitter_seconds=0.0,
+            on_terminal_failure=seen.append,
+        )
+
+        caplog.set_level(logging.ERROR, logger="convert_sdk.diagnostics")
+        with _make_core(transport=transport, refresh=policy) as core:
+            assert core._refresher is not None
+            core.refresh_now(wait=True, timeout=2.0)
+
+            # Callback fired exactly once with the validation error.
+            assert len(seen) == 1
+            assert isinstance(seen[0], ConfigValidationError)
+
+            # Worker stopped — no infinite retry loop on a permanently
+            # broken upstream payload.
+            core._refresher._thread.join(timeout=2.0)  # type: ignore[union-attr]
+            assert not core._refresher.is_running
+
+            status = core.refresher_status
+            assert status.terminal_failure is True
+            assert status.is_running is False
+            assert status.last_error_type == "ConfigValidationError"
+
+        events = [record.__dict__.get("sdk_event") for record in caplog.records]
+        assert "refresh.terminal_failure" in events
+
+    def test_transient_failure_does_not_stop_worker(self) -> None:
+        transport = RecordingTransport(
+            payloads=[_base_config_payload()],
+            fetch_error=RuntimeError("network blip"),
+            error_starts_at_call=2,
+        )
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+        with _make_core(transport=transport, refresh=policy) as core:
+            assert core._refresher is not None
+            core.refresh_now(wait=True, timeout=2.0)
+            # Transient failures keep the worker alive; the host can
+            # observe consecutive_failures climbing without recreating
+            # Core.
+            assert core._refresher.is_running
+            assert not core.refresher_status.terminal_failure
+            assert core.refresher_status.consecutive_failures == 1
+
+
+# ---------------------------------------------------------------------------
+# Public refresh_now(wait=...) and refresher_status surface
+# ---------------------------------------------------------------------------
+
+
+class TestPublicRefreshSurface:
+    def test_refresh_now_wait_blocks_until_complete(self) -> None:
+        first = _base_config_payload()
+        second = _config_with_experience("checkout")
+        transport = RecordingTransport(payloads=[first, second])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        with _make_core(transport=transport, refresh=policy) as core:
+            ok = core.refresh_now(wait=True, timeout=2.0)
+            assert ok is True
+            # By the time wait returns, the snapshot has been swapped.
+            assert "checkout" in core.snapshot.experiences_by_key
+
+    def test_refresh_now_returns_true_when_disabled(self) -> None:
+        transport = RecordingTransport(payloads=[_base_config_payload()])
+        with _make_core(transport=transport, refresh=None) as core:
+            assert core.refresh_now() is True
+            assert core.refresh_now(wait=True, timeout=0.1) is True
+
+    def test_refresher_status_when_disabled(self) -> None:
+        transport = RecordingTransport(payloads=[_base_config_payload()])
+        with _make_core(transport=transport, refresh=None) as core:
+            status = core.refresher_status
+            assert status.enabled is False
+            assert status.is_running is False
+            assert status.consecutive_failures == 0
+            assert status.last_refresh_at is None
+            assert status.last_success_at is None
+            assert status.last_error_type is None
+            assert status.terminal_failure is False
+
+    def test_refresher_status_after_successful_refresh(self) -> None:
+        first = _base_config_payload()
+        second = _config_with_experience("checkout")
+        transport = RecordingTransport(payloads=[first, second])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        with _make_core(transport=transport, refresh=policy) as core:
+            assert core.refresh_now(wait=True, timeout=2.0)
+            status = core.refresher_status
+            assert status.enabled is True
+            assert status.is_running is True
+            assert status.consecutive_failures == 0
+            assert status.last_refresh_at is not None
+            assert status.last_success_at is not None
+            assert status.last_error_type is None
+
+    def test_refresh_completed_clears_between_attempts(self) -> None:
+        # Calling wait_for_next_refresh after a healthy tick must not
+        # return immediately because the previous attempt set the latch.
+        # _do_refresh clears the latch at the start of every attempt,
+        # so the second wait blocks until the second tick finishes.
+        transport = RecordingTransport(
+            payloads=[_base_config_payload(), _config_with_experience("a"), _config_with_experience("b")]
+        )
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+        with _make_core(transport=transport, refresh=policy) as core:
+            assert core._refresher is not None
+            core.refresh_now(wait=True, timeout=2.0)
+            # Without a fresh trigger, wait_for_next_refresh on its own
+            # would have observed the prior tick's set event before the
+            # fix; with the clear at the start of _do_refresh, the latch
+            # is unset until the next attempt completes.
+            assert core._refresher._refresh_completed.is_set()
+            core._refresher._refresh_completed.clear()
+            core.refresh_now(wait=True, timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
+# Core.close(flush=...) flushes pending tracking events
+# ---------------------------------------------------------------------------
+
+
+class TestCloseFlush:
+    def test_close_flushes_pending_events_by_default(self) -> None:
+        # Configure a goal so a conversion can actually be tracked.
+        payload = _base_config_payload()
+        payload["goals"] = [{"id": "g1", "key": "purchase", "status": "active"}]
+        transport = RecordingTransport(payloads=[payload])
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+
+        # Track tracking-send calls separately from config fetches.
+        tracking_calls: list[Mapping[str, Any]] = []
+        original_send = transport.send_tracking
+
+        def record_send(request: TrackingRequest) -> Mapping[str, Any]:
+            tracking_calls.append({
+                "account_id": request.account_id,
+                "project_id": request.project_id,
+            })
+            return original_send(request)
+
+        transport.send_tracking = record_send  # type: ignore[method-assign]
+
+        core = _make_core(transport=transport, refresh=policy)
+        ctx = core.create_context("visitor-flush")
+        ctx.track_conversion("purchase")
+        assert core._tracking_queue is not None
+        assert core._tracking_queue.pending_event_count == 1
+
+        core.close()  # flush=True default
+
+        assert len(tracking_calls) == 1
+        assert core._tracking_queue.pending_event_count == 0
+
+    def test_close_flush_false_drops_events(self) -> None:
+        payload = _base_config_payload()
+        payload["goals"] = [{"id": "g1", "key": "purchase", "status": "active"}]
+        transport = RecordingTransport(payloads=[payload])
+        tracking_calls: list[Any] = []
+        original_send = transport.send_tracking
+
+        def record_send(request: TrackingRequest) -> Mapping[str, Any]:
+            tracking_calls.append(request)
+            return original_send(request)
+
+        transport.send_tracking = record_send  # type: ignore[method-assign]
+
+        core = _make_core(transport=transport, refresh=None)
+        ctx = core.create_context("visitor-no-flush")
+        ctx.track_conversion("purchase")
+
+        core.close(flush=False)
+
+        assert tracking_calls == []
+        # Pending events are still there from a queue-state perspective
+        # but the transport never saw them.
+
+    def test_close_continues_when_flush_raises(self) -> None:
+        # A failing transport during flush must not prevent worker
+        # teardown — close() still has to stop the refresher.
+        payload = _base_config_payload()
+        payload["goals"] = [{"id": "g1", "key": "purchase", "status": "active"}]
+        transport = RecordingTransport(payloads=[payload])
+
+        def boom(_request: TrackingRequest) -> Mapping[str, Any]:
+            raise RuntimeError("tracking endpoint down")
+
+        transport.send_tracking = boom  # type: ignore[method-assign]
+
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+        core = _make_core(transport=transport, refresh=policy)
+        ctx = core.create_context("visitor-flush-fail")
+        ctx.track_conversion("purchase")
+
+        # Should not raise even though flush internally fails.
+        core.close()
+
+        assert core._refresher is None
+        assert transport.closed is True
+
+
+# ---------------------------------------------------------------------------
+# Tracking-queue id atomicity under concurrent refresh
+# ---------------------------------------------------------------------------
+
+
+class TestTrackingIdAtomicity:
+    def test_release_reads_account_and_project_ids_atomically(self) -> None:
+        # The send_tracking stub asserts that account_id and project_id
+        # are observed as a coherent pair on every call. update_snapshot_metadata
+        # writes them under the same lock that release() uses to grab the
+        # batch, so a concurrent refresh cannot expose half-updated ids
+        # on the outbound request.
+        from convert_sdk.domain.results import ConversionEvent
+
+        payload = _base_config_payload()
+        payload["goals"] = [{"id": "g1", "key": "purchase", "status": "active"}]
+        transport = RecordingTransport(payloads=[payload])
+
+        observed: list[tuple[Optional[str], Optional[str]]] = []
+        coherence_violations: list[tuple[Optional[str], Optional[str]]] = []
+
+        def record_send(request: TrackingRequest) -> Mapping[str, Any]:
+            pair = (request.account_id, request.project_id)
+            observed.append(pair)
+            # Coherent pairs are either ("acct-A","proj-A") or ("acct-B","proj-B").
+            if pair not in (("acct-A", "proj-A"), ("acct-B", "proj-B")):
+                coherence_violations.append(pair)
+            return {"status": 200}
+
+        transport.send_tracking = record_send  # type: ignore[method-assign]
+
+        policy = RefreshConfig(interval_seconds=3600.0, jitter_seconds=0.0)
+        core = _make_core(transport=transport, refresh=policy)
+        try:
+            queue = core._tracking_queue
+            assert queue is not None
+            queue.update_snapshot_metadata(account_id="acct-A", project_id="proj-A")
+
+            def make_event(idx: int) -> ConversionEvent:
+                return ConversionEvent(
+                    visitor_id=f"v-atom-{idx}",
+                    goal_id="g1",
+                    goal_key="purchase",
+                )
+
+            stop = threading.Event()
+
+            def updater() -> None:
+                while not stop.is_set():
+                    queue.update_snapshot_metadata(
+                        account_id="acct-A", project_id="proj-A"
+                    )
+                    queue.update_snapshot_metadata(
+                        account_id="acct-B", project_id="proj-B"
+                    )
+
+            def releaser() -> None:
+                idx = 0
+                while not stop.is_set():
+                    queue.enqueue([make_event(idx)])
+                    queue.release(reason="atomicity_test")
+                    idx += 1
+
+            threads = [
+                threading.Thread(target=updater),
+                threading.Thread(target=releaser),
+            ]
+            for thread in threads:
+                thread.start()
+            time.sleep(0.1)
+            stop.set()
+            for thread in threads:
+                thread.join(timeout=2.0)
+
+            assert observed, "no tracking calls were observed"
+            assert coherence_violations == []
+        finally:
+            core.close(flush=False)

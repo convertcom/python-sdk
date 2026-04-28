@@ -26,7 +26,7 @@ rather than JavaScript idioms.
 | `core.off(event, handler)` | `core.off(LifecycleEvent.X, handler)` | Same pattern |
 | `context.releaseQueues()` | `context.release_queues(reason=...)` | Optional reason string |
 | `dataRefreshInterval: 300000` (default-on, ms) | `SDKConfig(refresh=RefreshConfig(interval_seconds=300.0))` (opt-in, seconds) | Unit and default differ — see "Background config refresh" below |
-| `'config.updated'` event | `LifecycleEvent.CONFIG_UPDATED` | Fires on every successful refresh that changes the snapshot |
+| `'config.updated'` event | `LifecycleEvent.CONFIG_UPDATED` | JS fires after every successful fetch with non-empty data; Python fires only when the snapshot actually differs from the prior one. Hosts that wired `'config.updated'` to a cache-invalidation hook will see fewer (snapshot-changed) signals after migrating |
 
 ## Initialization
 
@@ -251,9 +251,11 @@ without reading this section will run on stale config indefinitely.**
 | Default behaviour | Always on | Off (`SDKConfig.refresh = None`) |
 | Config field | `dataRefreshInterval` | `SDKConfig.refresh = RefreshConfig(...)` |
 | Units | milliseconds | seconds |
-| On error | Logs and stops rescheduling | Exponential backoff, never gives up |
+| On transient error | Logs and stops rescheduling | Exponential backoff, keeps retrying |
+| On bad upstream payload | Logs the parse failure | Fires `on_terminal_failure`, stops worker |
 | Failure callback | None | `RefreshConfig.on_terminal_failure` |
-| Snapshot-changed event | `'config.updated'` | `LifecycleEvent.CONFIG_UPDATED` |
+| Update event | `'config.updated'` fires after every successful fetch | `CONFIG_UPDATED` fires only when the snapshot actually differs |
+| Observability | None on the public surface | `core.refresher_status` |
 
 **JavaScript:**
 

@@ -58,12 +58,16 @@ class RefreshConfig:
     on_terminal_failure: Optional[Callable[[Exception], None]] = None
 
     def __post_init__(self) -> None:
-        # Misconfigured policies silently corrupt long-running services
-        # (negative sleeps tight-loop the worker, factor<1 inverts the
-        # backoff curve, max<initial fires the terminal callback on the
-        # very first failure). Reject at construction time so the host
-        # gets a clean ConfigValidationError instead of a worker that
-        # mysteriously hammers the upstream or alerts immediately.
+        # Misconfigured policies silently corrupt long-running services.
+        # Reject at construction time so the host gets a clean
+        # ConfigValidationError instead of a worker that mysteriously
+        # hammers the upstream, alerts immediately, or never alerts.
+        #
+        # Strict inequalities on backoff_max > backoff_initial and
+        # backoff_factor > 1.0 are deliberate: equality on either field
+        # makes the backoff cap unreachable in finite failures (factor=1)
+        # or reachable on the very first failure (max=initial), both of
+        # which break the terminal-callback contract the worker exposes.
         if self.interval_seconds <= 0:
             raise ConfigValidationError(
                 "RefreshConfig.interval_seconds must be > 0",
@@ -91,18 +95,18 @@ class RefreshConfig:
                 code="refresh.invalid_backoff",
                 context={"backoff_initial_seconds": self.backoff_initial_seconds},
             )
-        if self.backoff_max_seconds < self.backoff_initial_seconds:
+        if self.backoff_max_seconds <= self.backoff_initial_seconds:
             raise ConfigValidationError(
-                "RefreshConfig.backoff_max_seconds must be >= backoff_initial_seconds",
+                "RefreshConfig.backoff_max_seconds must be > backoff_initial_seconds",
                 code="refresh.invalid_backoff",
                 context={
                     "backoff_initial_seconds": self.backoff_initial_seconds,
                     "backoff_max_seconds": self.backoff_max_seconds,
                 },
             )
-        if self.backoff_factor < 1.0:
+        if self.backoff_factor <= 1.0:
             raise ConfigValidationError(
-                "RefreshConfig.backoff_factor must be >= 1.0",
+                "RefreshConfig.backoff_factor must be > 1.0",
                 code="refresh.invalid_backoff",
                 context={"backoff_factor": self.backoff_factor},
             )
