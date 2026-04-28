@@ -81,9 +81,9 @@ When async lands, it lands as a parallel surface, not a replacement.
 | `ports/storage.py`                        | ➕ extend     | Add `AsyncDataStore` Protocol alongside `DataStore`. |
 | `ports/event_bus.py`                      | ✅ keep sync  | Handlers schedule their own async work; bus stays sync. |
 | `adapters/transport/httpx_transport.py`   | ➕ sibling    | Add `HttpxAsyncTransport` using `httpx.AsyncClient`. |
-| `adapters/storage/in_memory.py`           | ✅ ready      | Thread-safe; usable from async via `asyncio.to_thread()`. |
-| `adapters/events/in_memory_event_bus.py`  | ✅ ready      | Sync handlers; async handlers can be scheduled via `asyncio.create_task()` in user-supplied wrappers. |
-| `tracking/queue.py`                       | ✅ ready      | `threading.Lock`-protected; in-memory queue can be reused under async via `asyncio.to_thread()` or by wrapping with an `asyncio.Lock`-protected adapter. |
+| `adapters/storage/in_memory.py`           | ➕ wrap        | Thread-safe but synchronous; from async code, call through `asyncio.to_thread()` or supply an `AsyncDataStore` adapter. Not "drop-in async-ready." |
+| `adapters/events/in_memory_event_bus.py`  | ➕ wrap        | Sync `emit()` invokes handlers on the calling thread, which would block the event loop if invoked from a coroutine. Async-aware use requires a small wrapper that schedules handlers via `asyncio.create_task`. |
+| `tracking/queue.py`                       | ➕ wrap        | `threading.Lock`-protected; correct for sync use. From async code, calling `release()` directly would block the event loop — call it through `asyncio.to_thread()` or behind an `AsyncTrackingQueue` adapter. |
 | `tracking/payloads.py`, `tracking/conversions.py` | ✅ ready | Pure compute; reused. |
 | `config_loader/loader.py`                 | ➕ sibling    | Add `async def load_config_snapshot_async` mirroring the sync function. |
 | `config_loader/refresh.py`                | ➕ sibling    | Sync daemon-thread refresher stays; `AsyncConfigRefresher` would be an asyncio-task variant for `AsyncCore`. |
@@ -91,16 +91,20 @@ When async lands, it lands as a parallel surface, not a replacement.
 | `context.py`                              | ➕ sibling    | Add `AsyncContext` class with async tracking calls. |
 | `diagnostics.py`, `errors.py`, `events.py` | ✅ ready     | No I/O; reused. |
 
-**No MVP module needs to change to enable async.** The seams above are
-"add a sibling", never "rewrite". This is the architectural payoff for
-the deferral discipline.
+**No MVP module needs a destructive rewrite to enable async.** The seams
+above are "add a sibling" or "wrap with an async adapter", never
+"rewrite the existing class." `✅ ready` means "reusable verbatim from a
+coroutine"; `➕ sibling` means "add a parallel async class"; `➕ wrap`
+means "the sync class stays as-is but async callers must reach it
+through an async adapter or `asyncio.to_thread()` to avoid blocking the
+event loop."
 
 ## Public method names already reserve async flexibility
 
-The MVP names — `run_experience`, `run_feature`, `run_experiences`,
-`run_features`, `track_conversion`, `flush_tracking`, `refresh_now`,
-`close` — work as-is for both surfaces. The async surface gets the same
-names on its `AsyncContext` / `AsyncCore` classes:
+Most MVP names — `run_experience`, `run_feature`, `run_experiences`,
+`run_features`, `track_conversion`, `flush_tracking`, `refresh_now` —
+work as-is for both surfaces. The async surface gets the same names on
+its `AsyncContext` / `AsyncCore` classes:
 
 ```python
 # Sync (today)
@@ -116,9 +120,11 @@ await async_core.refresh_now()
 await async_core.aclose()
 ```
 
-`AsyncCore.aclose()` follows the asyncio convention (cf.
-`asyncio.StreamWriter.aclose`); the async context manager hooks
-(`__aenter__` / `__aexit__`) round it out.
+`AsyncCore.aclose()` is a deliberate exception: the asyncio convention
+is to spell shutdown methods with the `a*` prefix (cf.
+`asyncio.StreamWriter.aclose`), and an `await core.close()` reusing the
+sync name would mislead readers about what is awaitable. The async
+context-manager hooks (`__aenter__` / `__aexit__`) round it out.
 
 ## Framework integrations
 
@@ -167,21 +173,29 @@ applies unchanged to async output.
 
 ## Open questions to resolve at Phase 3 sign-off
 
-These are intentionally not decided yet. They will be settled when the
-async API is opened for implementation:
+The intent recorded above is the leaning architecture; the items below
+are the specific points that Phase 3 sign-off needs to decide. Until
+sign-off, the design above can shift on these axes:
 
-- **Async transport boundary**: `httpx.AsyncClient` adapter vs.
-  remaining sync at the transport boundary and offloading via
-  `asyncio.to_thread()`. The architecture leans toward a real async
-  adapter, but the wrapper approach is cheaper if Phase 3 is
-  time-constrained.
+- **Async transport implementation tactic**: the leaning is a real
+  `HttpxAsyncTransport` built on `httpx.AsyncClient`, but `to_thread()`-
+  wrapping the sync transport is a documented fallback if Phase 3 is
+  time-constrained. The Protocol shape (`AsyncTransport` with `async
+  def fetch_config` / `send_tracking`) is fixed either way; the
+  question is which adapter ships first.
 - **DataStore Protocol shape**: a separate `AsyncDataStore` Protocol
-  vs. a dual-protocol convention (one Protocol, two suites of
-  methods — e.g., `load_context_state` / `aload_context_state`).
-- **Async event bus**: keep the bus sync and let users schedule async
-  work in handlers, or add a parallel `AsyncEventBus`. The architecture
-  already lists "keep sync" as the leaning, but the framework-helper
-  use cases may motivate a real async bus.
+  (the leaning) vs. a dual-protocol convention (one Protocol, two
+  suites of methods — e.g., `load_context_state` /
+  `aload_context_state`). Picking the dual-protocol convention removes
+  one type but couples the two surfaces tightly.
+- **Async event bus**: keep the bus sync (the leaning) and let users
+  schedule async work in handlers, or add a parallel `AsyncEventBus`.
+  The framework-helper use cases may motivate a real async bus; the
+  decision waits on those concrete requirements.
+- **Concurrency limit for sync→async fallback**: if the `to_thread()`
+  fallback is taken, the SDK should document the minimum
+  `asyncio.get_event_loop().set_default_executor()` configuration
+  needed to avoid head-of-line blocking under FastAPI burst load.
 
 ## Read next
 
