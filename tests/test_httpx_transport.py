@@ -75,7 +75,7 @@ def test_httpx_transport_uses_expected_route_headers_and_query() -> None:
 
     payload = transport.fetch_config(
         ConfigRequest(
-            sdk_key="1001/2002",
+            sdk_key="sdk-key-1001",
             sdk_key_secret="secret-value",
             environment="staging",
             transport=TransportConfig(
@@ -88,7 +88,7 @@ def test_httpx_transport_uses_expected_route_headers_and_query() -> None:
     assert payload["project"]["id"] == "2002"
     assert client.get_calls == [
         {
-            "url": "https://config.example.com/api/v1/config/1001/2002",
+            "url": "https://config.example.com/api/v1/config/sdk-key-1001",
             "params": {"environment": "staging"},
             "headers": {
                 "Accept": "application/json",
@@ -105,7 +105,7 @@ def test_httpx_transport_posts_tracking_payload_to_sdk_key_route() -> None:
 
     result = transport.send_tracking(
         TrackingRequest(
-            sdk_key="1001/2002",
+            sdk_key="sdk-key-1001",
             sdk_key_secret="secret-value",
             account_id="1001",
             project_id="2002",
@@ -120,7 +120,7 @@ def test_httpx_transport_posts_tracking_payload_to_sdk_key_route() -> None:
     assert result == {"ok": True}
     assert client.post_calls == [
         {
-            "url": "https://track.example.com/v1/track/1001/2002",
+            "url": "https://track.example.com/v1/track/sdk-key-1001",
             "json": {"visitors": []},
             "headers": {
                 "Accept": "application/json",
@@ -168,7 +168,7 @@ def test_httpx_transport_rejects_non_object_json_payloads() -> None:
     with pytest.raises(TypeError, match="non-object JSON payload"):
         transport.fetch_config(
             ConfigRequest(
-                sdk_key="1001/2002",
+                sdk_key="sdk-key-1001",
                 sdk_key_secret=None,
                 environment=None,
                 transport=TransportConfig(

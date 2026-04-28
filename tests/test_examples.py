@@ -300,7 +300,7 @@ class TestEvaluationGuide:
         assert feature.status in (FeatureStatus.ENABLED, FeatureStatus.DISABLED)
 
     def test_run_feature_variables_are_typed(self) -> None:
-        """Variables are type-cast per the declared type in the config."""
+        """Variables are type-cast per the declared type when type_cast=True."""
         from convert_sdk import Core, SDKConfig
 
         core = Core(SDKConfig(config_data=_make_config(), environment="production"))
@@ -308,6 +308,7 @@ class TestEvaluationGuide:
         feature = context.run_feature(
             "checkout-banner",
             location_attributes={"path": "/checkout"},
+            type_cast=True,
         )
         assert feature is not None
         assert isinstance(feature.variables.get("discount"), int)

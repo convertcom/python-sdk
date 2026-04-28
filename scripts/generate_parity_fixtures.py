@@ -1,4 +1,17 @@
-"""Generate checked-in JavaScript parity fixtures for the Python SDK test suite."""
+"""Generate checked-in JavaScript parity fixtures for the Python SDK test suite.
+
+The script spawns Node and ``require``-loads the sibling JavaScript SDK
+package (``../javascript-sdk/packages/js-sdk``), runs each parity
+scenario through the real ``ConvertSDK`` instance, and writes the
+recorded outputs as the ``expected`` field in the fixture JSON files.
+
+Provenance is captured in the ``source`` block of every fixture: the
+JavaScript package root, the test config, the generation command, and —
+critically — the JS-SDK package version + git commit SHA. Without those
+pins, fixtures freeze at "whatever was checked out locally" and silent
+drift is undetectable on CI. ``tests/parity/`` reads the pins to
+verify regenerated fixtures match the JS SDK we expect.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +33,31 @@ FIXTURE_FILES = (
     "rule_vectors.json",
     "state_vectors.json",
 )
+
+
+def _read_js_sdk_version(package_root: Path) -> str | None:
+    pkg = package_root / "package.json"
+    if not pkg.is_file():
+        return None
+    try:
+        return json.loads(pkg.read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        return None
+
+
+def _read_js_sdk_commit(javascript_sdk_root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=javascript_sdk_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    sha = result.stdout.strip()
+    return sha or None
 
 JS_EXPORT_SCRIPT = r"""
 const path = require("path");
@@ -456,7 +494,24 @@ def export_js_reference_payload(javascript_sdk_root: Path) -> dict[str, Any]:
         text=True,
         env=env,
     )
-    return json.loads(result.stdout)
+    payload: dict[str, Any] = json.loads(result.stdout)
+
+    # Stamp every fixture's ``source`` block with the JS-SDK version and
+    # commit SHA so a future regenerate-and-diff CI hook can detect when
+    # the recorded outputs no longer match the pinned upstream.
+    js_sdk_version = _read_js_sdk_version(package_root)
+    js_sdk_commit = _read_js_sdk_commit(javascript_sdk_root)
+    for fixture in payload.values():
+        if not isinstance(fixture, dict):
+            continue
+        source = fixture.get("source")
+        if not isinstance(source, dict):
+            continue
+        if js_sdk_version is not None:
+            source["javascript_sdk_version"] = js_sdk_version
+        if js_sdk_commit is not None:
+            source["javascript_sdk_commit"] = js_sdk_commit
+    return payload
 
 
 def write_fixture_files(output_dir: Path, payload: dict[str, Any]) -> None:

@@ -10,6 +10,7 @@ from typing import Sequence
 from ..config import TrackingConfig, TransportConfig
 from ..diagnostics import log_diagnostic_event
 from ..domain.results import ConversionEvent, TrackingFlushResult
+from ..errors import TrackingDeliveryError
 from ..events import LifecycleEvent, visitor_reference
 from ..ports.event_bus import EventBus
 from ..ports.storage import DataStore
@@ -184,6 +185,7 @@ class TrackingQueue:
             batch_size=self._tracking_config.batch_size,
         )
 
+        quarantined_event_count = 0
         while True:
             with self._lock:
                 if not self._pending:
@@ -195,11 +197,36 @@ class TrackingQueue:
                 account_id = self._account_id
                 project_id = self._project_id
 
-            payload = serialize_tracking_payload(
-                batch,
-                source=self._tracking_config.source,
-                enrich_data=self._tracking_config.enrich_data,
-            )
+            try:
+                payload = serialize_tracking_payload(
+                    batch,
+                    source=self._tracking_config.source,
+                    enrich_data=self._tracking_config.enrich_data,
+                )
+            except Exception as exc:
+                # Poison-pill quarantine: the offending batch is
+                # un-serializable (e.g. mismatched account/project ids
+                # within the batch). Without this the bad events stay
+                # in ``_pending`` and the next ``release()`` hits the
+                # same exception forever. Drop the batch with a
+                # diagnostic and continue with the rest of the queue.
+                with self._lock:
+                    del self._pending[: len(batch)]
+                quarantined_event_count += len(batch)
+                log_diagnostic_event(
+                    "tracking.delivery.quarantined",
+                    level=logging.WARNING,
+                    reason=reason,
+                    batch_size=len(batch),
+                    error_type=type(exc).__name__,
+                    error_code=getattr(exc, "code", None),
+                )
+                logger.warning(
+                    "tracking batch quarantined due to serialization failure",
+                    extra={"error_type": type(exc).__name__},
+                )
+                continue
+
             try:
                 self._transport.send_tracking(
                     TrackingRequest(
@@ -232,7 +259,19 @@ class TrackingQueue:
                     **details,
                 )
                 logger.warning("tracking delivery failure", extra=details)
-                raise
+                # Wrap in a typed error that carries the partial-
+                # success bookkeeping. Callers that catch this can
+                # tell how many batches actually went out before the
+                # failure; the original exception is reachable via
+                # ``__cause__``.
+                raise TrackingDeliveryError(
+                    f"Tracking delivery failed after {delivered_batch_count} "
+                    f"successful batch(es): {type(exc).__name__}",
+                    delivered_event_count=delivered_event_count,
+                    delivered_batch_count=delivered_batch_count,
+                    remaining_event_count=remaining_event_count,
+                    context={"reason": reason, "error_type": type(exc).__name__},
+                ) from exc
 
             with self._lock:
                 del self._pending[: len(batch)]

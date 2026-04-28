@@ -68,9 +68,12 @@ class RefreshConfig:
         # makes the backoff cap unreachable in finite failures (factor=1)
         # or reachable on the very first failure (max=initial), both of
         # which break the terminal-callback contract the worker exposes.
-        if self.interval_seconds <= 0:
+        if self.interval_seconds < 1.0:
+            # Sub-second refresh intervals hammer the upstream CDN at
+            # near-loop speed and trigger rate-limiting; reject at
+            # construction so the worker is never started this way.
             raise ConfigValidationError(
-                "RefreshConfig.interval_seconds must be > 0",
+                "RefreshConfig.interval_seconds must be >= 1.0",
                 code="refresh.invalid_interval",
                 context={"interval_seconds": self.interval_seconds},
             )

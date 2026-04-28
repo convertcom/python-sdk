@@ -309,7 +309,7 @@ class Context:
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         environment: Optional[str] = None,
-        type_cast: bool = True,
+        type_cast: bool = False,
     ) -> FeatureResult | None:
         """Resolve a single feature locally for this visitor."""
 
@@ -333,7 +333,7 @@ class Context:
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         environment: Optional[str] = None,
-        type_cast: bool = True,
+        type_cast: bool = False,
     ) -> FeatureDiagnostic:
         """Return a diagnosable non-exception outcome for a feature request."""
 
@@ -380,7 +380,7 @@ class Context:
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         environment: Optional[str] = None,
-        type_cast: bool = True,
+        type_cast: bool = False,
     ) -> list[FeatureResult]:
         """Resolve all applicable features locally for this visitor."""
 

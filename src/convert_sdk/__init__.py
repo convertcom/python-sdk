@@ -15,17 +15,22 @@ from .domain.results import (
     GoalDiagnostic,
     TrackingFlushResult,
 )
+from .config_loader.refresh import RefresherStatus
 from .errors import (
     ConfigLoadError,
     ConfigValidationError,
     ConversionDataError,
+    ConvertSDKError,
     GoalNotFoundError,
     InitializationError,
+    TrackingDeliveryError,
     TrackingError,
 )
 from .events import LifecycleEvent, LifecycleEventPayload
 from .adapters.storage import InMemoryDataStore
+from .ports.event_bus import EventBus
 from .ports.storage import DataStore
+from .ports.transport import Transport
 from .version import __version__
 
 __all__ = [
@@ -35,9 +40,11 @@ __all__ = [
     "ConversionDataError",
     "ConversionEvent",
     "ConversionResult",
+    "ConvertSDKError",
     "Core",
     "DataStore",
     "EntityDiagnostic",
+    "EventBus",
     "ExperienceDiagnostic",
     "ExperienceResult",
     "FeatureDiagnostic",
@@ -50,10 +57,13 @@ __all__ = [
     "LifecycleEvent",
     "LifecycleEventPayload",
     "RefreshConfig",
+    "RefresherStatus",
     "SDKConfig",
     "TrackingConfig",
+    "TrackingDeliveryError",
     "TrackingError",
     "TrackingFlushResult",
+    "Transport",
     "TransportConfig",
     "__version__",
 ]

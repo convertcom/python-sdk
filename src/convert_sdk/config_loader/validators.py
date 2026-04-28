@@ -85,3 +85,34 @@ def validate_config_data(config_data: Mapping[str, Any] | None) -> None:
             code="config.invalid_data",
             context={"reason": "project_id_required", "field": "project.id"},
         )
+
+    # Type-check the optional list-shaped collections at the boundary
+    # so an upstream returning an HTML page or a string-typed payload
+    # is rejected with a clean diagnostic instead of silently producing
+    # an empty index downstream. Missing keys remain valid (the
+    # normalizer fills them with empty tuples).
+    for field in (
+        "experiences",
+        "features",
+        "goals",
+        "audiences",
+        "segments",
+        "archived_experiences",
+    ):
+        if field not in config_data:
+            continue
+        value = config_data[field]
+        if value is None:
+            continue
+        if isinstance(value, (str, bytes, bytearray)):
+            raise ConfigValidationError(
+                f"config_data.{field} must be a list, not a string",
+                code="config.invalid_data",
+                context={"reason": "list_field_must_be_sequence", "field": field},
+            )
+        if not isinstance(value, (list, tuple, Mapping)):
+            raise ConfigValidationError(
+                f"config_data.{field} must be a list",
+                code="config.invalid_data",
+                context={"reason": "list_field_must_be_sequence", "field": field},
+            )
