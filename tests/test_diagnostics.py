@@ -130,15 +130,17 @@ def test_config_failure_diagnostics_do_not_log_secret_values(
         config_error=RuntimeError("network error for sdk-key-secret and visitor-123")
     )
 
-    with caplog.at_level(logging.DEBUG, logger="convert_sdk.diagnostics"):
-        with pytest.raises(ConfigLoadError):
-            Core(
-                SDKConfig(
-                    sdk_key="sdk-key-secret",
-                    sdk_key_secret="top-secret",
-                ),
-                transport=transport,
-            )
+    with (
+        caplog.at_level(logging.DEBUG, logger="convert_sdk.diagnostics"),
+        pytest.raises(ConfigLoadError),
+    ):
+        Core(
+            SDKConfig(
+                sdk_key="sdk-key-secret",
+                sdk_key_secret="top-secret",
+            ),
+            transport=transport,
+        )
 
     records = diagnostic_records(caplog)
     events = [record.sdk_event for record in records]

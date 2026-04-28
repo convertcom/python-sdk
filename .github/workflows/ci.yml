@@ -1,0 +1,202 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev-branch]
+  pull_request:
+    branches: [main, dev-branch]
+  workflow_call: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
+  PYTHONDONTWRITEBYTECODE: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Sync dev dependencies
+        run: uv sync --group dev --frozen
+      - name: Ruff check
+        run: uv run ruff check .
+
+  type-check:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Sync dev dependencies
+        run: uv sync --group dev --frozen
+      - name: Mypy strict
+        run: uv run mypy
+
+  test:
+    name: pytest ${{ matrix.python-version }} / ${{ matrix.os }}
+    needs: [lint, type-check]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Sync dev dependencies
+        run: uv sync --group dev --frozen
+      - name: Parity gate
+        # qs-03: parity must pass independently of coverage; runs first so a
+        # parity drift fails the matrix cell before coverage results matter.
+        run: uv run pytest tests/parity -x --tb=short -p no:cacheprovider
+      - name: Unit + integration tests with coverage
+        run: >
+          uv run pytest -p no:cacheprovider
+          --cov=convert_sdk
+          --cov-report=term-missing
+          --cov-fail-under=85
+      - name: Evaluation coverage gate (>=95%)
+        # qs-03: evaluation/ has its own threshold above the project floor.
+        run: >
+          uv run coverage report
+          --include='src/convert_sdk/evaluation/*'
+          --fail-under=95
+
+  bounds-check:
+    name: Dependency bounds (lower / upper)
+    needs: [lint, type-check]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bounds: [lower, upper]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+      - name: Set up Python (lower)
+        if: matrix.bounds == 'lower'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Set up Python (upper)
+        if: matrix.bounds == 'upper'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install lower-bound deps
+        if: matrix.bounds == 'lower'
+        run: |
+          uv sync --group dev --frozen
+          uv pip install --constraint ci/lower-bounds-overrides.txt --reinstall httpx
+      - name: Install upper-bound deps
+        if: matrix.bounds == 'upper'
+        run: uv sync --group dev --upgrade
+      - name: Run unit + integration tests
+        # qs-09: smoke-test the SDK at both bounds extremes.
+        run: uv run pytest -p no:cacheprovider --no-cov tests
+
+  changelog-fragment:
+    name: Changelog fragment present
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Sync dev dependencies
+        run: uv sync --group dev --frozen
+      - name: Verify a changes/ fragment landed in this PR
+        # qs-10: every PR that changes user-visible behavior must add a fragment.
+        # Internal-only PRs can use the `internal` category.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch origin "$BASE_REF" --depth=1
+          DIFF_FILES=$(git diff --name-only "origin/$BASE_REF"...HEAD)
+          if echo "$DIFF_FILES" | grep -E '^changes/[0-9]+\.(feature|bugfix|breaking|deprecation|internal)\.md$' >/dev/null; then
+            echo "Found changelog fragment in PR diff."
+            exit 0
+          fi
+          echo "::error::No changelog fragment found in changes/."
+          echo "Add a file named changes/<issue_or_pr>.<category>.md (categories: feature, bugfix, breaking, deprecation, internal)."
+          exit 1
+
+  build:
+    name: Build wheel + sdist
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build artifacts
+        run: uv build
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14

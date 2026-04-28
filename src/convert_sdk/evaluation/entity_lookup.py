@@ -39,7 +39,8 @@ def get_entity_by_key(
     index_name = ENTITY_LOOKUP_BY_KEY.get(normalized_type)
     if index_name is None:
         return None
-    return getattr(snapshot, index_name).get(normalized_key)
+    entry: Mapping[str, Any] | None = getattr(snapshot, index_name).get(normalized_key)
+    return entry
 
 
 def get_entity_by_id(
@@ -57,7 +58,8 @@ def get_entity_by_id(
     index_name = ENTITY_LOOKUP_BY_ID.get(normalized_type)
     if index_name is None:
         return None
-    return getattr(snapshot, index_name).get(normalized_id)
+    entry: Mapping[str, Any] | None = getattr(snapshot, index_name).get(normalized_id)
+    return entry
 
 
 def _lookup_variation_by_key(

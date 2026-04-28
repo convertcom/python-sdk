@@ -58,7 +58,7 @@ def load_config_snapshot(config: SDKConfig, transport: Transport) -> ConfigSnaps
 
     try:
         config_data = transport.fetch_config(request)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         endpoint_host = _safe_hostname(config.transport.config_endpoint)
         log_diagnostic_event(
             "config.load.failed",
@@ -114,7 +114,7 @@ def _build_validated_snapshot(
             endpoint_host=endpoint_host,
         )
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log_diagnostic_event(
             "config.load.failed",
             level=logging.WARNING,

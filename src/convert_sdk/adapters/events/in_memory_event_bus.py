@@ -42,5 +42,5 @@ class InMemoryEventBus:
         for handler in handlers:
             try:
                 handler(payload)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("lifecycle handler failed")

@@ -1,0 +1,8 @@
+# pip-constraints file: pins runtime dependencies to their declared lower
+# bound so the bounds-check CI job can verify the SDK still works at the
+# oldest supported versions. See qs-09-dependency-bounds-verification.md.
+#
+# When pyproject.toml widens a runtime dependency's lower bound, update the
+# matching pin here and add a CHANGELOG fragment recording the bump.
+
+httpx==0.28.0

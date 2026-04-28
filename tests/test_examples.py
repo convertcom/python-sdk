@@ -223,7 +223,7 @@ class TestInitializationGuide:
 
     def test_tracking_config_defaults(self) -> None:
         """TrackingConfig fields described in initialization.md have correct defaults."""
-        from convert_sdk import SDKConfig, TrackingConfig
+        from convert_sdk import SDKConfig
 
         config = SDKConfig(config_data=_make_config())
         assert config.tracking.batch_size == 10
@@ -232,7 +232,7 @@ class TestInitializationGuide:
 
     def test_transport_config_defaults(self) -> None:
         """TransportConfig fields described in initialization.md have correct defaults."""
-        from convert_sdk import SDKConfig, TransportConfig
+        from convert_sdk import SDKConfig
 
         config = SDKConfig(config_data=_make_config())
         assert "cdn-4.convertexperiments.com" in config.transport.config_endpoint

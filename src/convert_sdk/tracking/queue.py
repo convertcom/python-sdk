@@ -188,7 +188,7 @@ class TrackingQueue:
                         transport=self._transport_config,
                     )
                 )
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 with self._lock:
                     remaining_event_count = len(self._pending)
                 details = {

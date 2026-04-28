@@ -10,10 +10,10 @@ from typing import Any, Mapping
 from .config_snapshot import freeze_mapping
 
 
-EMPTY_VARIABLES = MappingProxyType({})
-EMPTY_CONVERSION_DATA = MappingProxyType({})
-EMPTY_BUCKETING_DATA = MappingProxyType({})
-EMPTY_DIAGNOSTIC_DETAILS = MappingProxyType({})
+EMPTY_VARIABLES: Mapping[str, Any] = MappingProxyType({})
+EMPTY_CONVERSION_DATA: Mapping[str, Any] = MappingProxyType({})
+EMPTY_BUCKETING_DATA: Mapping[str, Any] = MappingProxyType({})
+EMPTY_DIAGNOSTIC_DETAILS: Mapping[str, Any] = MappingProxyType({})
 
 
 def freeze_variables(variables: Mapping[str, Any] | None) -> Mapping[str, Any]:

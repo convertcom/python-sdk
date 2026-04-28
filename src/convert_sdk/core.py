@@ -53,7 +53,7 @@ class Core:
                 self._config,
                 transport=self._transport,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log_diagnostic_event(
                 "sdk.initialization.failed",
                 level=logging.WARNING,

@@ -118,9 +118,11 @@ def test_delivery_failure_emits_event_logs_safely_and_reraises(caplog: pytest.Lo
     context = core.create_context("visitor-123", {"tier": "premium"})
     context.track_conversion("purchase")
 
-    with caplog.at_level("WARNING", logger="convert_sdk.tracking"):
-        with pytest.raises(RuntimeError, match="network secret visitor-123"):
-            context.release_queues("manual-flush")
+    with (
+        caplog.at_level("WARNING", logger="convert_sdk.tracking"),
+        pytest.raises(RuntimeError, match="network secret visitor-123"),
+    ):
+        context.release_queues("manual-flush")
 
     assert [payload.event for payload in captured] == [
         LifecycleEvent.QUEUE_RELEASE_STARTED,
