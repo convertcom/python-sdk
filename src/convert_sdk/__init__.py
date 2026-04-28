@@ -1,6 +1,6 @@
 """Stable public import boundary for the Convert Python SDK."""
 
-from .config import SDKConfig, TrackingConfig, TransportConfig
+from .config import RefreshConfig, SDKConfig, TrackingConfig, TransportConfig
 from .context import Context
 from .core import Core
 from .domain.results import (
@@ -49,6 +49,7 @@ __all__ = [
     "InitializationError",
     "LifecycleEvent",
     "LifecycleEventPayload",
+    "RefreshConfig",
     "SDKConfig",
     "TrackingConfig",
     "TrackingError",
