@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Build and publish to PyPI
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write   # for gh release create
+      id-token: write   # for OIDC Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Sync dev dependencies (towncrier lives here)
+        run: uv sync --group dev --frozen
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify pyproject.toml version matches tag
+        env:
+          EXPECTED: ${{ steps.version.outputs.version }}
+        run: |
+          ACTUAL=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::pyproject.toml version ($ACTUAL) does not match tag version ($EXPECTED)"
+            exit 1
+          fi
+
+      - name: Compile changelog fragments
+        run: |
+          uv run towncrier build --yes --version "${{ steps.version.outputs.version }}"
+          # towncrier removes consumed fragments; the resulting CHANGELOG.md is
+          # included in the sdist via [tool.hatch.build.targets.sdist].
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Verify build metadata
+        run: uv run python -m zipfile -l dist/*.whl
+
+      - name: Publish to PyPI via OIDC Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          # No `password:` field — OIDC `id-token: write` provides the
+          # short-lived token. The PyPI project must have a Trusted
+          # Publisher configured for this repo + workflow file.
+
+      - name: Extract release notes for this version
+        id: notes
+        run: |
+          uv run python scripts/extract_release_notes.py \
+            --version "${{ steps.version.outputs.version }}" \
+            --output release-notes.md
+          echo "notes_file=release-notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "${{ steps.version.outputs.version }}" =~ (a|b|rc|dev|alpha|beta) ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file "${{ steps.notes.outputs.notes_file }}" \
+            $PRERELEASE_FLAG

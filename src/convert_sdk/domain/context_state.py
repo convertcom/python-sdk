@@ -9,8 +9,8 @@ from typing import Any, Mapping, Optional, Sequence
 from .config_snapshot import freeze_mapping, freeze_value
 
 
-EMPTY_VISITOR_ATTRIBUTES = MappingProxyType({})
-EMPTY_VISITOR_PROPERTIES = MappingProxyType({})
+EMPTY_VISITOR_ATTRIBUTES: Mapping[str, Any] = MappingProxyType({})
+EMPTY_VISITOR_PROPERTIES: Mapping[str, Any] = MappingProxyType({})
 EMPTY_DEFAULT_SEGMENTS: tuple[str, ...] = ()
 
 

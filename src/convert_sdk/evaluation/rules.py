@@ -105,7 +105,7 @@ def _match_value(actual: Any, expected: Any, match_type: str) -> bool:
         return str(actual).endswith(str(expected))
     if match_type == "regexMatches":
         return re.search(str(expected), str(actual)) is not None
-    return actual == expected
+    return bool(actual == expected)
 
 
 def _to_number(value: Any) -> float:

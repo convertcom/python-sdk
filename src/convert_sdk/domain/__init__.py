@@ -11,9 +11,9 @@ from .results import (
 )
 
 __all__ = [
+    "ContextState",
     "ConversionEvent",
     "ConversionResult",
-    "ContextState",
     "ExperienceResult",
     "FeatureResult",
     "FeatureStatus",

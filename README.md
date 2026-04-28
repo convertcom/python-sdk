@@ -164,6 +164,35 @@ Full topic guides and migration references are available in [`docs/`](docs/):
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev
+UV_CACHE_DIR=/tmp/uv-cache uv run ruff check .
+UV_CACHE_DIR=/tmp/uv-cache uv run mypy
 UV_CACHE_DIR=/tmp/uv-cache uv run pytest -p no:cacheprovider
 UV_CACHE_DIR=/tmp/uv-cache uv build
 ```
+
+To reproduce every release gate locally:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/verify_release.py
+```
+
+### Releasing
+
+Releases are tag-driven and publish through PyPI Trusted Publishing (OIDC,
+no long-lived tokens). The full pipeline lives in
+[`.github/workflows/release.yml`](.github/workflows/release.yml); maintainer
+steps are documented in [`docs/release-process.md`](docs/release-process.md).
+
+Quick summary:
+
+1. Land a release PR that bumps `version` in `pyproject.toml`.
+2. Tag the merge commit on `main` with `vX.Y.Z` (or `vX.Y.ZrcN` for
+   pre-releases) and push the tag.
+3. The release workflow re-runs CI, compiles `changes/` fragments into
+   `CHANGELOG.md` via `towncrier`, builds the wheel + sdist, publishes
+   through `pypa/gh-action-pypi-publish` with OIDC, and creates a
+   GitHub Release with the extracted notes.
+
+Every PR that changes user-visible behavior must include a `changes/`
+changelog fragment (see [`changes/README.md`](changes/README.md)). The
+`Changelog fragment present` CI check enforces this.
