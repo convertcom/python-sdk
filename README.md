@@ -147,18 +147,25 @@ python examples/basic_feature.py
 
 ### Documentation
 
-Full topic guides and migration references are available in [`docs/`](docs/):
+Full topic guides, migration references, and architecture notes live in the
+[Python SDK Wiki](https://github.com/convertcom/python-sdk/wiki):
 
-- [docs/index.md](docs/index.md) — guide index and public API quick-reference
-- [docs/initialization.md](docs/initialization.md) — SDK key, direct config, transport and tracking options
-- [docs/evaluation.md](docs/evaluation.md) — experiences, features, segments
-- [docs/tracking.md](docs/tracking.md) — conversion events, deduplication, revenue data
-- [docs/queue-control.md](docs/queue-control.md) — explicit flush, batch sizing, lifecycle events
-- [docs/debugging.md](docs/debugging.md) — diagnostic logging, typed errors, `*Diagnostic` result objects
-- [docs/extending.md](docs/extending.md) — custom transport, storage, and event-bus
-- [docs/support-workflows.md](docs/support-workflows.md) — what to gather before filing a bug
-- [docs/migration-from-rest.md](docs/migration-from-rest.md) — moving from raw REST integrations
-- [docs/migration-from-javascript.md](docs/migration-from-javascript.md) — mapping JS SDK concepts to Pythonic equivalents
+- [Quickstart](https://github.com/convertcom/python-sdk/wiki/Quickstart) — 5-minute Python setup
+- [Installation](https://github.com/convertcom/python-sdk/wiki/Installation) — pip, uv, Poetry
+- [Initialization](https://github.com/convertcom/python-sdk/wiki/Initialization) — SDK key, direct config, opt-in `RefreshConfig`
+- [Configuration](https://github.com/convertcom/python-sdk/wiki/Configuration) — every field of every config dataclass
+- [Code Examples](https://github.com/convertcom/python-sdk/wiki/CodeExamples) — every public method on `Core` and `Context`
+- [Type Hints](https://github.com/convertcom/python-sdk/wiki/TypeHints) — frozen dataclasses, Protocols, enums
+- [Diagnostics](https://github.com/convertcom/python-sdk/wiki/Diagnostics) — diagnostic logging, typed errors, `diagnose_*`, support workflow
+- [Extending](https://github.com/convertcom/python-sdk/wiki/Extending) — custom transport, storage, event-bus
+- [Testing](https://github.com/convertcom/python-sdk/wiki/Testing) — pytest patterns, parity fixtures, CI gates
+- [Async and Framework Integrations](https://github.com/convertcom/python-sdk/wiki/AsyncAndFrameworks) — Phase 3 design intent
+- [Migrating from the JavaScript SDK](https://github.com/convertcom/python-sdk/wiki/MigrationFromJavascript)
+- [Migrating from Raw REST](https://github.com/convertcom/python-sdk/wiki/MigrationFromRest)
+
+Cross-SDK concepts (bucketing, rule evaluation, data model, etc.) are
+synced into the wiki from the canonical Fullstack docs and shared across
+the JS, PHP, and Python SDK wikis.
 
 ### Local Development
 
@@ -181,7 +188,8 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/verify_release.py
 Releases are tag-driven and publish through PyPI Trusted Publishing (OIDC,
 no long-lived tokens). The full pipeline lives in
 [`.github/workflows/release.yml`](.github/workflows/release.yml); maintainer
-steps are documented in [`docs/release-process.md`](docs/release-process.md).
+steps are documented in the wiki under
+[Release Process](https://github.com/convertcom/python-sdk/wiki/ReleaseProcess).
 
 Quick summary:
 

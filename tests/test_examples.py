@@ -186,11 +186,11 @@ def test_basic_feature_example_runs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# docs/initialization.md — code sample coverage
+# Wiki page: Initialization — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestInitializationGuide:
-    """Covers code samples from docs/initialization.md."""
+    """Covers code samples from the wiki Initialization page."""
 
     def test_direct_config_initialization(self) -> None:
         """Mirrors the 'Initialize With Direct Config' sample in initialization.md."""
@@ -241,11 +241,11 @@ class TestInitializationGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/evaluation.md — code sample coverage
+# Wiki page: CodeExamples (Evaluation section) — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestEvaluationGuide:
-    """Covers code samples from docs/evaluation.md."""
+    """Covers code samples from the wiki CodeExamples page (Evaluation section)."""
 
     def test_run_experience_returns_result_for_bucketed_visitor(self) -> None:
         """Mirrors the run_experience() sample in evaluation.md."""
@@ -386,11 +386,11 @@ class TestEvaluationGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/tracking.md — code sample coverage
+# Wiki page: CodeExamples (Tracking section) — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestTrackingGuide:
-    """Covers code samples from docs/tracking.md."""
+    """Covers code samples from the wiki CodeExamples page (Tracking section)."""
 
     def test_track_conversion_basic(self) -> None:
         """Mirrors the basic conversion sample in tracking.md."""
@@ -483,11 +483,11 @@ class TestTrackingGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/queue-control.md — code sample coverage
+# Wiki page: CodeExamples (Queue Control section) — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestQueueControlGuide:
-    """Covers code samples from docs/queue-control.md."""
+    """Covers code samples from the wiki CodeExamples page (Queue Control section)."""
 
     def test_release_queues_empty_queue(self) -> None:
         """release_queues on an empty queue returns attempted=False."""
@@ -548,11 +548,11 @@ class TestQueueControlGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/debugging.md — code sample coverage
+# Wiki page: Diagnostics — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestDebuggingGuide:
-    """Covers code samples from docs/debugging.md."""
+    """Covers code samples from the wiki Diagnostics page."""
 
     def test_typed_error_code_and_context(self) -> None:
         """Mirrors the structured error handling sample in debugging.md."""
@@ -618,11 +618,11 @@ class TestDebuggingGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/extending.md — code sample coverage
+# Wiki page: Extending — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestExtendingGuide:
-    """Covers code samples from docs/extending.md."""
+    """Covers code samples from the wiki Extending page."""
 
     def test_stub_transport_fetch_config(self) -> None:
         """Mirrors the StubTransport sample from extending.md."""
@@ -693,11 +693,11 @@ class TestExtendingGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/migration-from-rest.md — code sample coverage
+# Wiki page: MigrationFromRest — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestMigrationFromRestGuide:
-    """Covers code samples from docs/migration-from-rest.md."""
+    """Covers code samples from the wiki MigrationFromRest page."""
 
     def test_sdk_replaces_manual_bucketing(self) -> None:
         """The SDK's bucket_value matches the algorithm described in migration-from-rest.md."""
@@ -751,7 +751,7 @@ class TestMigrationFromRestGuide:
         from convert_sdk import Core, SDKConfig
         from convert_sdk.evaluation.bucketing import get_bucket_value
 
-        # Verbatim copy of the snippet currently in docs/migration-from-rest.md
+        # Verbatim copy of the snippet currently in the wiki MigrationFromRest page
         # under "Side-by-side: bucketing". Keep these in sync.
         def select_variation(variations, bucket_value):
             accumulated = 0.0
@@ -796,11 +796,11 @@ class TestMigrationFromRestGuide:
 
 
 # ---------------------------------------------------------------------------
-# docs/migration-from-javascript.md — code sample coverage
+# Wiki page: MigrationFromJavascript — code sample coverage
 # ---------------------------------------------------------------------------
 
 class TestMigrationFromJavaScriptGuide:
-    """Covers code samples from docs/migration-from-javascript.md."""
+    """Covers code samples from the wiki MigrationFromJavascript page."""
 
     def test_create_context_snake_case(self) -> None:
         """Python uses snake_case for core.create_context (vs JS camelCase)."""
