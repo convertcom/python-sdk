@@ -1,0 +1,372 @@
+{
+  "generated_from": {
+    "reference": "npm `murmurhash` package v3 algorithm (faithful port), as imported by Convert JS SDK packages/utils/src/string-utils.ts generateHash",
+    "semantics": "charCodeAt(i) & 0xff over UTF-16 code units; length mix uses code-unit count",
+    "default_seed": 9999,
+    "output": "unsigned 32-bit integer [0, 2^32)",
+    "generator": "scripts/generate_bucketing_vectors.js",
+    "sourced": "machine-derived via node (story 1.4; long-term ownership: story 3.5 / qs-05)"
+  },
+  "vectors": [
+    {
+      "value": "",
+      "seed": 9999,
+      "expected": 3523940263
+    },
+    {
+      "value": "a",
+      "seed": 9999,
+      "expected": 1551580458
+    },
+    {
+      "value": "ab",
+      "seed": 9999,
+      "expected": 1233164425
+    },
+    {
+      "value": "abc",
+      "seed": 9999,
+      "expected": 3277137089
+    },
+    {
+      "value": "abcd",
+      "seed": 9999,
+      "expected": 347024488
+    },
+    {
+      "value": "test_visitor",
+      "seed": 9999,
+      "expected": 2397688595
+    },
+    {
+      "value": "用户123",
+      "seed": 9999,
+      "expected": 531569922
+    },
+    {
+      "value": "the quick brown fox",
+      "seed": 9999,
+      "expected": 1843213447
+    },
+    {
+      "value": "0",
+      "seed": 9999,
+      "expected": 935988371
+    },
+    {
+      "value": "12345",
+      "seed": 9999,
+      "expected": 495772237
+    },
+    {
+      "value": "e1visitor-1",
+      "seed": 9999,
+      "expected": 3363324936
+    },
+    {
+      "value": "e2visitor-1",
+      "seed": 9999,
+      "expected": 122205531
+    },
+    {
+      "value": "100456visitor_42",
+      "seed": 9999,
+      "expected": 1473076769
+    },
+    {
+      "value": "visitor-aaaaaaaa",
+      "seed": 9999,
+      "expected": 2843668571
+    },
+    {
+      "value": "visitor-zzzzzzzz",
+      "seed": 9999,
+      "expected": 1309693007
+    },
+    {
+      "value": "exp_100visitor_001",
+      "seed": 9999,
+      "expected": 2157136237
+    },
+    {
+      "value": "exp_100visitor_002",
+      "seed": 9999,
+      "expected": 1315355392
+    },
+    {
+      "value": "exp_100visitor_999",
+      "seed": 9999,
+      "expected": 3510656777
+    },
+    {
+      "value": "",
+      "seed": 0,
+      "expected": 0
+    },
+    {
+      "value": "a",
+      "seed": 0,
+      "expected": 1009084850
+    },
+    {
+      "value": "ab",
+      "seed": 0,
+      "expected": 2613040991
+    },
+    {
+      "value": "abc",
+      "seed": 0,
+      "expected": 3017643002
+    },
+    {
+      "value": "abcd",
+      "seed": 0,
+      "expected": 1139631978
+    },
+    {
+      "value": "test_visitor",
+      "seed": 0,
+      "expected": 1833246784
+    },
+    {
+      "value": "用户123",
+      "seed": 0,
+      "expected": 44766081
+    },
+    {
+      "value": "the quick brown fox",
+      "seed": 0,
+      "expected": 519850996
+    },
+    {
+      "value": "0",
+      "seed": 0,
+      "expected": 3530670207
+    },
+    {
+      "value": "12345",
+      "seed": 0,
+      "expected": 329585043
+    },
+    {
+      "value": "e1visitor-1",
+      "seed": 0,
+      "expected": 3325506812
+    },
+    {
+      "value": "e2visitor-1",
+      "seed": 0,
+      "expected": 876722480
+    },
+    {
+      "value": "100456visitor_42",
+      "seed": 0,
+      "expected": 2023684861
+    },
+    {
+      "value": "visitor-aaaaaaaa",
+      "seed": 0,
+      "expected": 1588645203
+    },
+    {
+      "value": "visitor-zzzzzzzz",
+      "seed": 0,
+      "expected": 2447883439
+    },
+    {
+      "value": "exp_100visitor_001",
+      "seed": 0,
+      "expected": 48034028
+    },
+    {
+      "value": "exp_100visitor_002",
+      "seed": 0,
+      "expected": 4194080714
+    },
+    {
+      "value": "exp_100visitor_999",
+      "seed": 0,
+      "expected": 1427520580
+    },
+    {
+      "value": "",
+      "seed": 1,
+      "expected": 1364076727
+    },
+    {
+      "value": "a",
+      "seed": 1,
+      "expected": 1485495528
+    },
+    {
+      "value": "ab",
+      "seed": 1,
+      "expected": 3087506246
+    },
+    {
+      "value": "abc",
+      "seed": 1,
+      "expected": 2859854335
+    },
+    {
+      "value": "abcd",
+      "seed": 1,
+      "expected": 2616542610
+    },
+    {
+      "value": "test_visitor",
+      "seed": 1,
+      "expected": 1073278336
+    },
+    {
+      "value": "用户123",
+      "seed": 1,
+      "expected": 2651977864
+    },
+    {
+      "value": "the quick brown fox",
+      "seed": 1,
+      "expected": 2721812506
+    },
+    {
+      "value": "0",
+      "seed": 1,
+      "expected": 2992457707
+    },
+    {
+      "value": "12345",
+      "seed": 1,
+      "expected": 1377935000
+    },
+    {
+      "value": "e1visitor-1",
+      "seed": 1,
+      "expected": 663373129
+    },
+    {
+      "value": "e2visitor-1",
+      "seed": 1,
+      "expected": 4056204783
+    },
+    {
+      "value": "100456visitor_42",
+      "seed": 1,
+      "expected": 2866908737
+    },
+    {
+      "value": "visitor-aaaaaaaa",
+      "seed": 1,
+      "expected": 2279399834
+    },
+    {
+      "value": "visitor-zzzzzzzz",
+      "seed": 1,
+      "expected": 3080288090
+    },
+    {
+      "value": "exp_100visitor_001",
+      "seed": 1,
+      "expected": 2700006985
+    },
+    {
+      "value": "exp_100visitor_002",
+      "seed": 1,
+      "expected": 3965955552
+    },
+    {
+      "value": "exp_100visitor_999",
+      "seed": 1,
+      "expected": 1860705681
+    },
+    {
+      "value": "",
+      "seed": 12345,
+      "expected": 1011272156
+    },
+    {
+      "value": "a",
+      "seed": 12345,
+      "expected": 2503289909
+    },
+    {
+      "value": "ab",
+      "seed": 12345,
+      "expected": 71479
+    },
+    {
+      "value": "abc",
+      "seed": 12345,
+      "expected": 3451355215
+    },
+    {
+      "value": "abcd",
+      "seed": 12345,
+      "expected": 665108144
+    },
+    {
+      "value": "test_visitor",
+      "seed": 12345,
+      "expected": 2447228397
+    },
+    {
+      "value": "用户123",
+      "seed": 12345,
+      "expected": 1659851834
+    },
+    {
+      "value": "the quick brown fox",
+      "seed": 12345,
+      "expected": 420956460
+    },
+    {
+      "value": "0",
+      "seed": 12345,
+      "expected": 2889586381
+    },
+    {
+      "value": "12345",
+      "seed": 12345,
+      "expected": 1760918438
+    },
+    {
+      "value": "e1visitor-1",
+      "seed": 12345,
+      "expected": 863410474
+    },
+    {
+      "value": "e2visitor-1",
+      "seed": 12345,
+      "expected": 43552042
+    },
+    {
+      "value": "100456visitor_42",
+      "seed": 12345,
+      "expected": 3809241981
+    },
+    {
+      "value": "visitor-aaaaaaaa",
+      "seed": 12345,
+      "expected": 2222023384
+    },
+    {
+      "value": "visitor-zzzzzzzz",
+      "seed": 12345,
+      "expected": 3356437109
+    },
+    {
+      "value": "exp_100visitor_001",
+      "seed": 12345,
+      "expected": 281529822
+    },
+    {
+      "value": "exp_100visitor_002",
+      "seed": 12345,
+      "expected": 1595031071
+    },
+    {
+      "value": "exp_100visitor_999",
+      "seed": 12345,
+      "expected": 2334436444
+    }
+  ]
+}
