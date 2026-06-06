@@ -1,0 +1,43 @@
+[project]
+name = "convert-python-sdk"
+dynamic = ["version"]
+description = "Convert Experiences FullStack SDK for Python — server-side A/B testing, feature flags, and personalizations."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    { name = "Convert.com", email = "support@convert.com" }
+]
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Homepage = "https://www.convert.com"
+Repository = "https://github.com/convertcom/python-sdk"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Single-source the version from src/convert_sdk/version.py (qs-01). The
+# pyproject [project].version is declared dynamic and resolved by hatch from
+# the module attribute below, so the version lives in exactly one place.
+[tool.hatch.version]
+path = "src/convert_sdk/version.py"
+
+[tool.hatch.build.targets.wheel]
+# Import package (convert_sdk) differs from the distribution name
+# (convert-python-sdk) by design — see qs-01 canonical naming. Point hatch at
+# the src/ layout explicitly so py.typed and all modules ship in the wheel.
+packages = ["src/convert_sdk"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/convert_sdk",
+    "README.md",
+    "pyproject.toml",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+]

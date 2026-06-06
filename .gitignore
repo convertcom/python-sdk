@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / distribution artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# uv / virtual environments
+.venv/
+venv/
+env/
+
+# uv lock — this is a LIBRARY (uv init --lib); the lockfile is intentionally
+# not committed so downstream consumers resolve their own dependency trees.
+uv.lock
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+.coverage
+.coverage.*
+
+# OS / editor cruft
+.DS_Store
