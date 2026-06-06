@@ -8,7 +8,14 @@ authors = [
     { name = "Convert.com", email = "support@convert.com" }
 ]
 requires-python = ">=3.9"
-dependencies = []
+# Runtime dependencies declare compatible-release bounds, never exact pins
+# (qs-09 dependency-bounds-verification). httpx is the SDK's only runtime
+# dependency: the >=0.28,<1.0 bound follows httpx's 0.x SemVer commitment
+# (no breaking changes within 0.x minors), avoiding frequent upper-bound bumps
+# (qs-09 F-060). Confirm the httpx changelog before widening.
+dependencies = [
+    "httpx>=0.28,<1.0",
+]
 
 [project.urls]
 Homepage = "https://www.convert.com"
@@ -40,4 +47,7 @@ include = [
 [dependency-groups]
 dev = [
     "pytest>=8,<9",
+    # RESPX route-level HTTPX mocking for transport/config-fetch tests
+    # (qs-06 integration-test-harness pattern; no socket-level patching).
+    "respx>=0.21,<1.0",
 ]

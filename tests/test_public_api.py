@@ -32,17 +32,21 @@ def test_version_single_sourced():
     assert pkg_version == module_version
 
 
-def test_no_internal_modules_reexported():
-    """Only the approved surface is public; internal module names must not be
-    re-exported at the top level."""
-    approved = {"Core", "Context", "__version__"}
+def test_frozen_story_1_1_boundary_still_public():
+    """The Story 1.1 frozen trio must remain in the public surface unchanged.
+
+    Story 1.2 *extends* the public surface (config + error types) but must not
+    remove or rename the frozen Story 1.1 boundary.
+    """
+    frozen = {"Core", "Context", "__version__"}
 
     declared = getattr(convert_sdk, "__all__", None)
     assert declared is not None, "convert_sdk must declare __all__"
-    assert set(declared) == approved, (
-        f"public __all__ drifted: {sorted(declared)} != {sorted(approved)}"
+    assert frozen.issubset(set(declared)), (
+        f"frozen Story 1.1 boundary dropped from public __all__: "
+        f"missing {sorted(frozen - set(declared))}"
     )
 
     # Internal module names must not appear as re-exported public attributes.
-    for internal in ("core", "context", "version"):
+    for internal in ("core", "context", "version", "config", "errors"):
         assert internal not in declared

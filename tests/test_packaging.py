@@ -30,10 +30,19 @@ def test_distribution_name_is_canonical():
     assert project["name"] == "convert-python-sdk"
 
 
-def test_runtime_dependencies_are_empty():
-    """Story 1.1 ships zero runtime dependencies (qs-09)."""
+def test_runtime_dependency_is_httpx_with_compatible_bounds():
+    """Story 1.2 adds httpx as the SDK's only runtime dependency, declared with
+    compatible-release bounds (>=0.28,<1.0) and never an exact pin (qs-09 F-060).
+    """
     project = _load_pyproject()["project"]
-    assert project.get("dependencies", []) == []
+    deps = project.get("dependencies", [])
+    assert deps == ["httpx>=0.28,<1.0"], (
+        f"expected exactly the httpx compatible-release bound, got {deps}"
+    )
+    # No exact pins (== / ===) belong in pyproject runtime deps — those live
+    # only in the CI lower-bounds override file (Story 5.1).
+    for dep in deps:
+        assert "==" not in dep, f"exact pin in runtime deps: {dep!r}"
 
 
 def test_requires_python_floor_is_39():
