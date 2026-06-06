@@ -60,6 +60,12 @@ class ConfigSnapshot:
     _features_by_id: Mapping[str, Any] = field(
         default_factory=dict, repr=False, compare=False
     )
+    _audiences_by_id: Mapping[str, Any] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _audiences_by_key: Mapping[str, Any] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -73,6 +79,12 @@ class ConfigSnapshot:
         )
         object.__setattr__(
             self, "_features_by_id", MappingProxyType(_index_by(self.features, "id"))
+        )
+        object.__setattr__(
+            self, "_audiences_by_id", MappingProxyType(_index_by(self.audiences, "id"))
+        )
+        object.__setattr__(
+            self, "_audiences_by_key", MappingProxyType(_index_by(self.audiences, "key"))
         )
 
     @classmethod
@@ -113,3 +125,9 @@ class ConfigSnapshot:
 
     def get_feature_by_id(self, feature_id: str) -> Optional[Mapping[str, Any]]:
         return self._features_by_id.get(feature_id)
+
+    def get_audience_by_id(self, audience_id: str) -> Optional[Mapping[str, Any]]:
+        return self._audiences_by_id.get(audience_id)
+
+    def get_audience_by_key(self, key: str) -> Optional[Mapping[str, Any]]:
+        return self._audiences_by_key.get(key)
