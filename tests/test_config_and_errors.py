@@ -104,6 +104,36 @@ def test_transportconfig_rejects_non_https_base_url():
         TransportConfig(base_url="http://insecure.example.com")
 
 
+def test_config_load_error_redacts_query_and_sdk_key():
+    """qs-08 NFR23 shim: ConfigLoadError messages strip the query string and
+    mask the /config/{sdkKey} key segment — no full key, no secret query
+    params ever appear."""
+    from convert_sdk import ConfigLoadError
+
+    err = ConfigLoadError(
+        "config fetch failed",
+        endpoint="https://cdn.example.com/config/sdk_key_abcdef1234567890?environment=prod&token=secret",
+        status_code=503,
+    )
+    msg = str(err)
+    assert "token=secret" not in msg
+    assert "environment=prod" not in msg
+    assert "?" not in msg
+    assert "sdk_key_abcdef1234567890" not in msg  # full key masked
+    assert "***" in msg
+    assert "status=503" in msg
+    assert "cdn.example.com/config/" in msg
+
+
+def test_config_load_error_masks_short_key_fully():
+    from convert_sdk import ConfigLoadError
+
+    err = ConfigLoadError("x", endpoint="https://h/config/short")
+    msg = str(err)
+    assert "short" not in msg
+    assert "/config/***" in msg
+
+
 def test_error_hierarchy_is_typed_and_distinct():
     """Initialization errors must be a distinct, catchable typed hierarchy so
     they are distinguishable from normal (future) evaluation no-result paths."""

@@ -154,9 +154,12 @@ def test_http_5xx_raises_config_load_error_with_redacted_endpoint():
 
     err = exc_info.value
     assert err.status_code == 503
-    # Redacted endpoint: host + path, no query string, no raw sdk key leak risk.
+    # Redacted endpoint: host + path, no query string, and the SDK key masked
+    # (qs-08 NFR23 — full keys never appear in error messages).
     assert "?" not in str(err)
-    assert "cdn-4.convertexperiments.com/config/sdkkey123" in str(err)
+    assert "cdn-4.convertexperiments.com/config/" in str(err)
+    assert "sdkkey123" not in str(err)  # full key must not leak
+    assert "***" in str(err)  # masked form present
 
 
 @respx.mock

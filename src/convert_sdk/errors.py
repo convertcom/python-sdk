@@ -25,16 +25,34 @@ NFR23.
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 from urllib.parse import urlsplit
 
+# Matches the config route's key segment so it can be masked in diagnostics.
+_CONFIG_ROUTE_RE = re.compile(r"(/config/)([^/?#]+)")
+
+
+def _redact_key(key: str) -> str:
+    """Mask an SDK key to ``first4***last4`` (qs-08 shape).
+
+    Short keys (<= 8 chars) are fully masked to ``***`` so they cannot be
+    reconstructed from the redacted form.
+    """
+    if len(key) <= 8:
+        return "***"
+    return f"{key[:4]}***{key[-4:]}"
+
 
 def _redact_url(url: Optional[str]) -> Optional[str]:
-    """Reduce a URL to ``host/path`` with the entire query string stripped.
+    """Reduce a URL to ``host/path`` with the query string stripped and any
+    config-route SDK key masked.
 
     This is the Story 1.2 inline redaction shim (qs-08). Stripping the whole
     query string — rather than only named secret parameters — eliminates the
     risk of a new credential parameter leaking before an allowlist is updated.
+    The ``/config/{sdkKey}`` path segment is additionally masked so a full SDK
+    key never appears in an error message, even at DEBUG level.
     """
     if not url:
         return url
@@ -42,9 +60,12 @@ def _redact_url(url: Optional[str]) -> Optional[str]:
     host = parts.netloc or ""
     path = parts.path or ""
     if host or path:
-        return f"{host}{path}"
-    # Not a recognizable absolute URL; return as-is (no query to leak).
-    return url
+        endpoint = f"{host}{path}"
+    else:
+        # Not a recognizable absolute URL; redact the raw value (no query).
+        endpoint = url.split("?", 1)[0]
+    # Mask any /config/{sdkKey} key segment.
+    return _CONFIG_ROUTE_RE.sub(lambda m: f"{m.group(1)}{_redact_key(m.group(2))}", endpoint)
 
 
 class ConvertSDKError(Exception):
