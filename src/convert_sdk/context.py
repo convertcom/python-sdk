@@ -27,9 +27,10 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
 from convert_sdk.domain.context_state import ContextState
-from convert_sdk.domain.results import ExperienceResult, FeatureResult
+from convert_sdk.domain.results import ConversionResult, ExperienceResult, FeatureResult
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
+from convert_sdk.tracking.conversions import create_conversion
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
@@ -220,4 +221,34 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+        )
+
+    # --- conversion tracking -----------------------------------------------
+
+    def track_conversion(self, goal_key: str) -> ConversionResult:
+        """Track a goal conversion for this visitor (Story 2.1).
+
+        Resolves ``goal_key`` against the current immutable snapshot and creates
+        an in-process conversion event associated with this visitor and the
+        resolved goal identity. Returns a typed
+        :class:`~convert_sdk.domain.results.ConversionResult`:
+
+        * ``status == ConversionStatus.QUEUED`` — the goal resolved and an event
+          was created (``result.event`` carries the
+          :class:`~convert_sdk.domain.results.ConversionEvent`).
+        * ``status == ConversionStatus.GOAL_NOT_FOUND`` — the goal key is absent
+          from the loaded config. This is a diagnosable NON-EXCEPTION outcome
+          (FR50), distinguishable from success via ``status`` alone — callers
+          never need ``try``/``except`` to tell the two apart.
+
+        Performs no network I/O and no payload serialization; event delivery,
+        payload shaping, batching, deduplication, and flush land in later Epic 2
+        stories. The Story 2.1 surface is goal-key only; richer conversion
+        attributes (e.g. revenue) arrive in Story 2.2 as additional keyword
+        arguments, keeping this signature forward-compatible.
+        """
+        return create_conversion(
+            self._snapshot,
+            visitor_id=self._state.visitor_id,
+            goal_key=goal_key,
         )
