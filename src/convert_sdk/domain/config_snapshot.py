@@ -66,6 +66,9 @@ class ConfigSnapshot:
     _audiences_by_key: Mapping[str, Any] = field(
         default_factory=dict, repr=False, compare=False
     )
+    _goals_by_key: Mapping[str, Any] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -85,6 +88,12 @@ class ConfigSnapshot:
         )
         object.__setattr__(
             self, "_audiences_by_key", MappingProxyType(_index_by(self.audiences, "key"))
+        )
+        # Story 2.1 (SDK-1): goals indexed by key so conversion tracking can
+        # resolve goal identity in O(1) from the immutable snapshot rather than
+        # scanning raw config (Critical Warning #4 / FR35).
+        object.__setattr__(
+            self, "_goals_by_key", MappingProxyType(_index_by(self.goals, "key"))
         )
 
     @classmethod
@@ -131,3 +140,12 @@ class ConfigSnapshot:
 
     def get_audience_by_key(self, key: str) -> Optional[Mapping[str, Any]]:
         return self._audiences_by_key.get(key)
+
+    def get_goal_by_key(self, key: str) -> Optional[Mapping[str, Any]]:
+        """Resolve a goal definition by its key, or ``None`` if absent.
+
+        Read-only accessor (never raises) used by conversion tracking to resolve
+        goal identity from the immutable snapshot. An unknown key returning
+        ``None`` is the normal diagnosable miss path (FR50), not an error.
+        """
+        return self._goals_by_key.get(key)
