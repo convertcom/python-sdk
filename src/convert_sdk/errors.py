@@ -117,3 +117,45 @@ class TransportError(ConvertSDKError):
     TLS-only transport is enforced at configuration time, before any network
     I/O is attempted.
     """
+
+
+class TrackingError(ConvertSDKError):
+    """Base for conversion-tracking *programmer-misuse* failures (Story 2.2).
+
+    Tracking has two distinct failure modes that must never be conflated:
+
+    * A *diagnosable no-result* — e.g. an unknown goal key — is **not** an
+      exception. Story 2.1 models that as a typed ``GOAL_NOT_FOUND``
+      :class:`~convert_sdk.domain.results.ConversionResult` (FR50) so callers
+      tell it apart from success via ``status`` alone.
+    * *Programmer misuse* — e.g. supplying conversion attributes the SDK cannot
+      serialize — fails fast with a typed exception under this family, so it is
+      diagnosable and distinguishable from a successful enqueue (NFR7/NFR23).
+
+    Keeping a dedicated ``TrackingError`` base (separate from ``ConfigError``)
+    means a caller can ``except TrackingError`` to catch tracking misuse without
+    accidentally swallowing config/transport failures.
+    """
+
+
+class ConversionDataError(TrackingError):
+    """A conversion attribute (``conversion_data`` value or revenue) is invalid.
+
+    Raised at enqueue time when a ``conversion_data`` value is not a JSON
+    primitive (nested objects/lists/arbitrary types are unsupported by the
+    backend tracking contract). It is distinct from the Story 2.1 unknown-goal
+    NON-EXCEPTION outcome (which is not an exception at all), so programmer
+    misuse fails fast and is never mistaken for a successful conversion.
+
+    NFR23 privacy: the error carries only the offending attribute *key* and a
+    short safe *reason*. It deliberately never embeds the raw offending value,
+    an SDK key, an auth header, or unrelated visitor PII — so the message and
+    ``repr`` are safe to log at any level.
+    """
+
+    def __init__(self, key: str, *, reason: str) -> None:
+        self.key = key
+        self.reason = reason
+        super().__init__(
+            f"invalid conversion_data for key {key!r}: {reason}"
+        )
