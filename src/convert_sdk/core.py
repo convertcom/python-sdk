@@ -60,15 +60,26 @@ class Core:
     def create_context(
         self,
         visitor_id: str,
-        attributes: Optional[Mapping[str, Any]] = None,
+        visitor_attributes: Optional[Mapping[str, Any]] = None,
         *,
         location_attributes: Optional[Mapping[str, Any]] = None,
     ) -> Context:
         """Create a visitor-scoped :class:`~convert_sdk.context.Context`.
 
-        The context evaluates against the current immutable snapshot. Attributes
-        are copied into the context defensively; later caller mutations do not
-        affect it. Requires the SDK to be initialized.
+        The context evaluates against the current immutable snapshot.
+        ``visitor_attributes`` are copied into the context defensively; later
+        caller mutations do not affect it. The created context is a
+        caller-scoped per-visitor object — reuse means the caller keeps and
+        reuses the returned :class:`Context`; ``Core`` does not cache contexts.
+        Requires the SDK to be initialized.
+
+        Args:
+            visitor_id: The stable visitor identity used for deterministic
+                bucketing.
+            visitor_attributes: Optional stored visitor attributes (e.g.
+                audience traits) used for audience qualification.
+            location_attributes: Optional stored location attributes used for
+                location-rule qualification.
 
         Raises:
             RuntimeError: if called before :meth:`initialize` (no snapshot).
@@ -81,7 +92,7 @@ class Core:
         return Context(
             visitor_id,
             self._snapshot,
-            attributes=attributes,
+            visitor_attributes=visitor_attributes,
             location_attributes=location_attributes,
         )
 
