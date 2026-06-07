@@ -170,6 +170,39 @@ for feature in context.run_features():
     print(feature.feature_key, feature.variables)
 ```
 
+## Conversion tracking
+
+`track_conversion` records a goal conversion for the visitor. It is lightweight
+and synchronous — it deduplicates by `(visitor_id, goal_id)` and appends to an
+in-process batch queue. **No network call happens on `track_conversion`**;
+queued events are delivered when the queue is released via `core.flush()`,
+batch-size release (`SDKConfig.batch_size`, default `10`), an opt-in periodic
+timer, or a best-effort `atexit` hook.
+
+```python
+result = context.track_conversion("purchase_completed", revenue=49.99)
+print(result.tracked, result.reason)   # True None
+
+# A default duplicate for the same (visitor, goal) is suppressed:
+again = context.track_conversion("purchase_completed")
+print(again.tracked, again.reason)      # False "deduplicated"
+
+# force_multiple re-tracks (e.g. repeated revenue/transactions):
+context.track_conversion("purchase_completed", revenue=10.0, force_multiple=True)
+
+# Deliver queued events explicitly (the canonical control point):
+core.flush()
+```
+
+## Runtime Integration
+
+Choosing *when* to flush depends on your runtime (Lambda, Cloud Run, gunicorn,
+uvicorn, Celery, CLI). The default lifecycle is **explicit-flush-only**, which is
+safe everywhere. See **[`docs/runtime-integration.md`](docs/runtime-integration.md)**
+for a per-runtime decision table and copy-pasteable flush snippets, including the
+opt-in daemonic periodic timer (`SDKConfig.auto_flush_interval_ms`), the
+best-effort `atexit` hook, and the documented SIGTERM pattern.
+
 ## Runnable examples
 
 Self-contained, framework-agnostic examples live in [`examples/`](examples/) and
@@ -192,8 +225,9 @@ Importable from `convert_sdk`:
 - `Core`, `Context`
 - `SDKConfig`, `TransportConfig`
 - `ExperienceResult`, `FeatureResult`, `FeatureStatus`
+- `ConversionResult`, `ConversionStatus`
 - error types: `ConvertSDKError`, `ConfigError`, `InvalidConfigError`,
-  `ConfigLoadError`, `TransportError`
+  `ConfigLoadError`, `TransportError`, `TrackingDeliveryError`
 - `__version__`
 
 ## Development
