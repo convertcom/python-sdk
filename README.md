@@ -106,18 +106,20 @@ with Core(SDKConfig(data=config_data)).initialize() as core:
 
 ## Creating a visitor context
 
-`create_context` binds a visitor identity (and optional attributes) to the
-current immutable config snapshot:
+`create_context` binds a visitor identity (and optional visitor attributes) to
+the current immutable config snapshot:
 
 ```python
 context = core.create_context(
     "visitor-001",
-    attributes={"country": "US", "plan": "pro"},
+    visitor_attributes={"country": "US", "plan": "pro"},
 )
 ```
 
 Visitor attributes are used for audience qualification. They are copied
 defensively — later mutations to the dict you pass never affect the context.
+Keep and reuse the returned `context` to evaluate the same visitor repeatedly;
+the SDK does not cache contexts for you.
 
 ## Experience evaluation
 
