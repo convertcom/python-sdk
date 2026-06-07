@@ -31,6 +31,7 @@ from convert_sdk.errors import (
     ConfigLoadError,
     ConvertSDKError,
     InvalidConfigError,
+    TrackingDeliveryError,
     TransportError,
 )
 from convert_sdk.version import __version__
@@ -49,6 +50,8 @@ __all__ = [
     "InvalidConfigError",
     "ConfigLoadError",
     "TransportError",
+    # Story 2.3 tracking-delivery error.
+    "TrackingDeliveryError",
     # Story 1.4 typed evaluation result.
     "ExperienceResult",
     # Minimal local feature-resolution foundation (Story 1.6).

@@ -31,7 +31,7 @@ from urllib.parse import urlencode
 import httpx
 
 from convert_sdk.config import SDKConfig, TransportConfig
-from convert_sdk.errors import ConfigLoadError
+from convert_sdk.errors import ConfigLoadError, TrackingDeliveryError
 
 
 class HttpxTransport:
@@ -109,6 +109,34 @@ class HttpxTransport:
                 status_code=response.status_code,
             )
         return body
+
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:
+        """POST a serialized tracking-events batch to ``/track/{sdkKey}`` (Story 2.3).
+
+        Delivers over the long-lived HTTPS client (TLS-only is enforced upstream
+        at :class:`~convert_sdk.config.TransportConfig` construction). Performs
+        NO retry/backoff — the tracking layer calls this exactly once per queue
+        release. Any transport/HTTP failure (connection error or non-2xx status)
+        raises a typed :class:`~convert_sdk.errors.TrackingDeliveryError` with a
+        redacted endpoint so the caller can leave the queue intact for a later
+        flush, without leaking the SDK key or query string (NFR23).
+        """
+        route = f"/track/{sdk_key}"
+        endpoint = f"{self._config.base_url}{route}"
+        try:
+            response = self._client.post(route, json=payload)
+        except httpx.HTTPError as exc:  # connection/timeout/etc.
+            raise TrackingDeliveryError(
+                f"tracking delivery failed: {type(exc).__name__}",
+                endpoint=endpoint,
+            ) from exc
+
+        if response.status_code >= 400:
+            raise TrackingDeliveryError(
+                "tracking delivery returned an error status",
+                endpoint=endpoint,
+                status_code=response.status_code,
+            )
 
     def close(self) -> None:
         self._client.close()

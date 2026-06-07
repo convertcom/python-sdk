@@ -29,8 +29,9 @@ import re
 from typing import Optional
 from urllib.parse import urlsplit
 
-# Matches the config route's key segment so it can be masked in diagnostics.
-_CONFIG_ROUTE_RE = re.compile(r"(/config/)([^/?#]+)")
+# Matches the config/tracking routes' key segment so it can be masked in
+# diagnostics (the SDK key appears as the final path segment in both).
+_CONFIG_ROUTE_RE = re.compile(r"(/(?:config|track)/)([^/?#]+)")
 
 
 def _redact_key(key: str) -> str:
@@ -117,6 +118,41 @@ class TransportError(ConvertSDKError):
     TLS-only transport is enforced at configuration time, before any network
     I/O is attempted.
     """
+
+
+class TrackingDeliveryError(ConvertSDKError):
+    """A tracking-events *delivery* attempt failed (Story 2.3).
+
+    Raised by the transport adapter when a tracking POST fails (network error
+    or non-2xx response). Distinct from :class:`TrackingError` — which is
+    reserved for *programmer misuse* at enqueue time — because a delivery
+    failure is an operational/transport condition. The message uses a redacted
+    endpoint and optional status code (NFR23 / qs-08 shim), mirroring
+    :class:`ConfigLoadError`, so a flush failure is diagnosable without leaking
+    the SDK key or query string.
+
+    This story does NOT add retry/backoff: the tracking layer calls the
+    transport once per release and surfaces this error; the queue is left
+    intact for a later explicit flush. Transport-level retries (if any) and
+    delivery-outcome reporting are out of scope (Stories 2.4 / transport layer).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        endpoint: Optional[str] = None,
+        status_code: Optional[int] = None,
+    ) -> None:
+        self.endpoint = _redact_url(endpoint)
+        self.status_code = status_code
+        detail_parts = []
+        if self.endpoint is not None:
+            detail_parts.append(f"endpoint={self.endpoint}")
+        if self.status_code is not None:
+            detail_parts.append(f"status={self.status_code}")
+        detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
+        super().__init__(f"{message}{detail}")
 
 
 class TrackingError(ConvertSDKError):
