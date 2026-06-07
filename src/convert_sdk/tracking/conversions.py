@@ -64,7 +64,12 @@ def create_conversion(
             event=None,
         )
 
-    goal_id = str(goal.get("id"))
+    # Goals are indexed by key, so a resolved goal is guaranteed to have a key
+    # but may (defensively) lack an id. Preserve the real id as a string; never
+    # coerce a missing id into the literal "None", which would poison
+    # downstream attribution and diagnosability.
+    raw_goal_id = goal.get("id")
+    goal_id = str(raw_goal_id) if raw_goal_id is not None else ""
     event = ConversionEvent(
         visitor_id=visitor_id,
         goal_id=goal_id,
