@@ -99,17 +99,21 @@ class FeatureResult:
 
 
 class ConversionStatus(str, enum.Enum):
-    """The outcome of attempting to track a conversion (Story 2.1).
+    """The outcome of attempting to track a conversion (Stories 2.1 + 2.3).
 
     Mirrors the typed-result-with-status-enum precedent set by
     :class:`FeatureStatus`. ``QUEUED`` means a conversion event was created and
-    associated with the visitor + resolved goal. ``GOAL_NOT_FOUND`` is the
+    enqueued for the visitor + resolved goal. ``GOAL_NOT_FOUND`` is the
     diagnosable NON-EXCEPTION outcome (FR50) for a goal key absent from the
-    loaded config — distinguishable from success without ``try``/``except``.
+    loaded config. ``DEDUPLICATED`` (Story 2.3) is the default-mode duplicate
+    outcome — the goal was already tracked for this ``(visitor_id, goal_id)`` and
+    ``force_multiple`` was not set, so no second event was enqueued. All three
+    are distinguishable from one another without ``try``/``except``.
     """
 
     QUEUED = "queued"
     GOAL_NOT_FOUND = "goal_not_found"
+    DEDUPLICATED = "deduplicated"
 
 
 @dataclass(frozen=True)
@@ -183,3 +187,27 @@ class ConversionResult:
     goal_id: Optional[str]
     visitor_id: str
     event: Optional[ConversionEvent] = None
+
+    @property
+    def tracked(self) -> bool:
+        """Whether the call resulted in an enqueued conversion (PRD contract).
+
+        Surfaces the PRD ``tracked`` boolean WITHOUT changing the Story 2.1
+        fields: it is derived from :attr:`status` (``True`` only for
+        ``QUEUED``). A deduplicated duplicate and an unknown goal are both
+        ``False``.
+        """
+        return self.status is ConversionStatus.QUEUED
+
+    @property
+    def reason(self) -> Optional[str]:
+        """The PRD ``reason`` string for a non-tracked outcome (derived).
+
+        ``None`` on a successful enqueue; ``"deduplicated"`` for a default-mode
+        duplicate; ``"goal_not_found"`` for an unknown goal. Derived from
+        :attr:`status` so the Story 2.1 result shape is preserved exactly while
+        exposing the PRD-enumerated ``reason`` value.
+        """
+        if self.status is ConversionStatus.QUEUED:
+            return None
+        return self.status.value
