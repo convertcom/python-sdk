@@ -89,6 +89,18 @@ def test_snapshot_precomputes_entity_key_indexes():
     assert snap.get_experience_by_key("missing") is None
 
 
+def test_snapshot_precomputes_goal_key_index():
+    """Story 2.1 (SDK-1): goals are indexed by key for O(1) resolution at
+    track-conversion time without scanning raw config (Critical Warning #4)."""
+    snap = load_snapshot(MINIMAL_CONFIG)
+    goal = snap.get_goal_by_key("goal-one")
+    assert goal is not None
+    assert goal["id"] == "g1"
+    assert goal["key"] == "goal-one"
+    # Unknown goal key returns None (read accessor, never raises).
+    assert snap.get_goal_by_key("does-not-exist") is None
+
+
 def test_snapshot_is_immutable():
     snap = load_snapshot(MINIMAL_CONFIG)
     # Frozen dataclass — assigning an attribute must fail.
