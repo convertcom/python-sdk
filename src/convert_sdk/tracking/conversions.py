@@ -23,16 +23,77 @@ Story 2.1 guardrails honored here:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
 from convert_sdk.domain.results import (
     ConversionEvent,
     ConversionResult,
     ConversionStatus,
 )
+from convert_sdk.errors import ConversionDataError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
+
+
+# JSON primitive types the backend tracking contract accepts as conversion-data
+# values. Nested objects/arrays and arbitrary Python objects are programmer
+# misuse and fail fast (AC#3). ``bool`` is intentionally allowed and is checked
+# before ``int`` would matter because ``bool`` is a JSON primitive too.
+_JSON_PRIMITIVES = (str, int, float, bool, type(None))
+
+
+def _validate_conversion_data(conversion_data: Optional[Mapping[str, Any]]) -> None:
+    """Reject non-JSON-primitive ``conversion_data`` values (AC#3 / NFR7).
+
+    Allows only ``str``/number/``bool``/``None`` values. Nested mappings,
+    sequences, and arbitrary objects raise a typed :class:`ConversionDataError`
+    naming the offending key with a safe reason — never echoing the raw value,
+    SDK keys, auth headers, or PII (NFR23).
+    """
+    if not conversion_data:
+        return
+    for key, value in conversion_data.items():
+        if not isinstance(value, _JSON_PRIMITIVES):
+            raise ConversionDataError(
+                str(key),
+                reason="value must be a JSON primitive (string, number, bool, or null)",
+            )
+
+
+def _compute_bucketing_assignments(
+    snapshot: "ConfigSnapshot",
+    *,
+    visitor_id: str,
+    visitor_attributes: Optional[Mapping[str, Any]],
+) -> Dict[str, str]:
+    """Derive the visitor's active variation assignments at conversion time.
+
+    Computed on demand from the immutable snapshot (no persisted bucketing store
+    exists yet — Story 3.2 will own one). Returns an ``{experience_id:
+    variation_id}`` map for every experience the visitor currently buckets into,
+    which is the attribution context the wire ``bucketingData`` is built from.
+    Reads only the snapshot + caller attributes; performs no I/O.
+    """
+    # Local import keeps the tracking <-> evaluation dependency one-directional
+    # at module-load time while still sharing the bucketing logic (the
+    # architecture forbids evaluation importing tracking, not the reverse).
+    from convert_sdk.evaluation.experiences import select_experience
+
+    assignments: Dict[str, str] = {}
+    for experience in snapshot.experiences:
+        key = experience.get("key")
+        if key is None:
+            continue
+        result = select_experience(
+            str(key),
+            snapshot,
+            visitor_id=visitor_id,
+            visitor_attributes=visitor_attributes,
+        )
+        if result is not None:
+            assignments[result.experience_id] = result.variation_id
+    return assignments
 
 
 def create_conversion(
@@ -40,18 +101,36 @@ def create_conversion(
     *,
     visitor_id: str,
     goal_key: str,
+    revenue: Optional[float] = None,
+    conversion_data: Optional[Mapping[str, Any]] = None,
+    visitor_attributes: Optional[Mapping[str, Any]] = None,
 ) -> ConversionResult:
     """Create an in-process conversion event for ``goal_key`` and ``visitor_id``.
 
-    Resolves the goal from the immutable ``snapshot``. On a hit, builds a
-    :class:`ConversionEvent` carrying the visitor and the stable goal identity
-    (id + key) and returns a ``QUEUED`` :class:`ConversionResult`. On a miss,
-    returns a ``GOAL_NOT_FOUND`` result with no event (FR50) — never raises.
+    Story 2.2 extends Story 2.1's goal-key-only service with optional
+    ``revenue``, caller-supplied ``conversion_data``, and the visitor's
+    attribution context (active segments from ``visitor_attributes`` + active
+    variation assignments computed from the snapshot at conversion time, FR34).
 
-    The result is diagnosable without leaking config secrets or unrelated
-    visitor data: only the requested ``goal_key`` and the visitor's own id are
-    echoed back.
+    ``conversion_data`` is validated FIRST — before goal resolution — so a bad
+    value (non-JSON-primitive / nested) fails fast with a typed
+    :class:`ConversionDataError` regardless of whether the goal exists.
+    Programmer misuse is never silently downgraded to a no-result (Critical
+    Warning #5).
+
+    On a goal hit, builds a :class:`ConversionEvent` carrying the visitor, the
+    stable goal identity, revenue/conversion_data, and the attribution context,
+    and returns a ``QUEUED`` :class:`ConversionResult`. On a goal miss, returns
+    a ``GOAL_NOT_FOUND`` result with no event (FR50) — never raises. Only the
+    requested ``goal_key`` and the visitor's own id are echoed back, so the
+    result is diagnosable without leaking config secrets or unrelated data.
+
+    No wire-name mapping, payload serialization, batching, dedup, or network I/O
+    happens here (those land in the serializer and later Epic 2 stories).
     """
+    # Fail fast on programmer misuse before any goal resolution (AC#3).
+    _validate_conversion_data(conversion_data)
+
     goal = snapshot.get_goal_by_key(goal_key)
     if goal is None:
         # FR50: typed, diagnosable, NON-EXCEPTION miss — distinguishable from
@@ -70,10 +149,24 @@ def create_conversion(
     # downstream attribution and diagnosability.
     raw_goal_id = goal.get("id")
     goal_id = str(raw_goal_id) if raw_goal_id is not None else ""
+
+    # Attribution context (FR34): active variation assignments computed from the
+    # snapshot, and the visitor's active segments (its stored attributes — the
+    # data segments are derived from in the current stack). Both are optional;
+    # an empty bucketing map is preserved as ``None`` so the serializer omits it.
+    bucketing_assignments = _compute_bucketing_assignments(
+        snapshot, visitor_id=visitor_id, visitor_attributes=visitor_attributes
+    )
+    segments = dict(visitor_attributes) if visitor_attributes else None
+
     event = ConversionEvent(
         visitor_id=visitor_id,
         goal_id=goal_id,
         goal_key=goal_key,
+        revenue=revenue,
+        conversion_data=conversion_data,
+        segments=segments,
+        bucketing_assignments=bucketing_assignments or None,
     )
     return ConversionResult(
         status=ConversionStatus.QUEUED,
