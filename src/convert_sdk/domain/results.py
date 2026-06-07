@@ -118,18 +118,45 @@ class ConversionEvent:
 
     Story 2.1 creates this locally from the current immutable snapshot and
     visitor state — it carries the stable goal identity needed for later payload
-    shaping (Story 2.2 owns ``tracking/payloads.py``). No raw outbound payload
-    serialization happens here, and no network I/O is performed.
+    shaping. Story 2.2 extends it with OPTIONAL revenue, caller-supplied
+    conversion attributes, and the visitor's attribution context (active
+    segments + active variation/bucketing assignments) so the serializer
+    (``tracking/payloads.py``) can build the verbose JS-SDK wire shape.
+
+    All fields here stay **snake_case internal** — no wire-name mapping happens
+    on this value object (that is the serializer's sole job, per the
+    architecture's data boundary). No raw outbound payload serialization happens
+    here and no network I/O is performed.
 
     Attributes:
         visitor_id: The visitor the conversion is attributed to.
         goal_id: The resolved goal's id (stable downstream-attribution identity).
         goal_key: The resolved goal's key (the public tracking handle / JS parity).
+        revenue: Optional revenue amount for the conversion (mapped to a
+            ``goalData`` ``{"key": "amount", ...}`` entry only at serialization).
+        conversion_data: Optional caller-supplied custom conversion attributes
+            (already validated as JSON primitives by the tracking service).
+        segments: The visitor's active segments at conversion time (attribution).
+        bucketing_assignments: The visitor's active variation assignments
+            (experience id → variation id) at conversion time (attribution).
     """
 
     visitor_id: str
     goal_id: str
     goal_key: str
+    revenue: Optional[float] = None
+    conversion_data: Optional[Mapping[str, Any]] = None
+    segments: Optional[Mapping[str, Any]] = None
+    bucketing_assignments: Optional[Mapping[str, str]] = None
+
+    def __post_init__(self) -> None:
+        # Wrap the optional attribution/conversion mappings read-only so the
+        # frozen event cannot be used to mutate caller- or snapshot-derived
+        # state through the result.
+        for name in ("conversion_data", "segments", "bucketing_assignments"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, MappingProxyType):
+                object.__setattr__(self, name, MappingProxyType(dict(value)))
 
 
 @dataclass(frozen=True)
