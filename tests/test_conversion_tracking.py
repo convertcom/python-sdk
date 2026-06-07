@@ -174,3 +174,117 @@ def test_public_api_exports_conversion_types():
     assert "ConversionStatus" in convert_sdk.__all__
     assert convert_sdk.ConversionResult is ConversionResult
     assert convert_sdk.ConversionStatus is ConversionStatus
+
+
+# --- Story 2.3: dedup outcomes + force_multiple on the public surface -----
+
+
+def test_conversion_status_has_deduplicated():
+    assert ConversionStatus.DEDUPLICATED.value == "deduplicated"
+
+
+def test_conversion_result_tracked_and_reason_properties():
+    # PRD contract surfaced WITHOUT changing the Story 2.1 fields: tracked/reason
+    # are derived from status.
+    queued = ConversionResult(
+        status=ConversionStatus.QUEUED,
+        goal_key="g",
+        goal_id="g1",
+        visitor_id="v",
+        event=None,
+    )
+    assert queued.tracked is True
+    assert queued.reason is None
+
+    dedup = ConversionResult(
+        status=ConversionStatus.DEDUPLICATED,
+        goal_key="g",
+        goal_id="g1",
+        visitor_id="v",
+        event=None,
+    )
+    assert dedup.tracked is False
+    assert dedup.reason == "deduplicated"
+
+    not_found = ConversionResult(
+        status=ConversionStatus.GOAL_NOT_FOUND,
+        goal_key="g",
+        goal_id=None,
+        visitor_id="v",
+        event=None,
+    )
+    assert not_found.tracked is False
+    assert not_found.reason == "goal_not_found"
+
+
+def _core_with_two_goals():
+    from convert_sdk import Core, SDKConfig
+
+    core = Core(SDKConfig(data=CONFIG)).initialize()
+    return core
+
+
+def test_track_conversion_default_duplicate_is_deduplicated():
+    core = _core_with_two_goals()
+    ctx = core.create_context("visitor-1")
+    first = ctx.track_conversion("purchase_completed")
+    assert first.status is ConversionStatus.QUEUED
+    assert first.tracked is True
+
+    second = ctx.track_conversion("purchase_completed")
+    assert second.status is ConversionStatus.DEDUPLICATED
+    assert second.tracked is False
+    assert second.reason == "deduplicated"
+
+
+def test_track_conversion_force_multiple_retracks():
+    core = _core_with_two_goals()
+    ctx = core.create_context("visitor-1")
+    ctx.track_conversion("purchase_completed")
+    again = ctx.track_conversion("purchase_completed", force_multiple=True)
+    assert again.status is ConversionStatus.QUEUED
+    assert again.tracked is True
+
+
+def test_track_conversion_dedup_is_by_goal_identity_not_payload():
+    core = _core_with_two_goals()
+    ctx = core.create_context("visitor-1")
+    ctx.track_conversion("purchase_completed", revenue=10.0)
+    # Different revenue must NOT defeat dedup.
+    second = ctx.track_conversion("purchase_completed", revenue=99.0)
+    assert second.status is ConversionStatus.DEDUPLICATED
+
+
+def test_track_conversion_unknown_goal_still_not_found():
+    core = _core_with_two_goals()
+    ctx = core.create_context("visitor-1")
+    result = ctx.track_conversion("ghost_goal")
+    assert result.status is ConversionStatus.GOAL_NOT_FOUND
+
+
+def test_dedup_state_shared_across_contexts_from_same_core():
+    # Contexts created from one Core share the dedup store, so the same visitor
+    # dedups across context instances (per-process boundary).
+    core = _core_with_two_goals()
+    ctx_a = core.create_context("visitor-1")
+    ctx_b = core.create_context("visitor-1")
+    ctx_a.track_conversion("signup")
+    second = ctx_b.track_conversion("signup")
+    assert second.status is ConversionStatus.DEDUPLICATED
+
+
+# --- Story 2.3: Core.flush() empty-queue no-op + GOAL_NOT_FOUND not queued -
+
+
+def test_flush_on_empty_queue_is_noop_no_transport_call():
+    core = _core_with_two_goals()
+    # No events tracked; flush must not raise and must not need a transport.
+    core.flush()  # should be a safe no-op
+
+
+def test_goal_not_found_does_not_enqueue():
+    core = _core_with_two_goals()
+    ctx = core.create_context("visitor-1")
+    ctx.track_conversion("ghost_goal")
+    # Nothing queued -> flush is a no-op (no transport configured for direct cfg).
+    core.flush()
