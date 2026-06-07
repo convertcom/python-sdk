@@ -26,8 +26,9 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
-from convert_sdk.domain.results import ExperienceResult
+from convert_sdk.domain.results import ExperienceResult, FeatureResult
 from convert_sdk.evaluation.experiences import select_experience
+from convert_sdk.evaluation.features import resolve_feature, resolve_features
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
@@ -145,3 +146,57 @@ class Context:
             if result is not None:
                 results.append(result)
         return results
+
+    # --- feature resolution ------------------------------------------------
+
+    def run_feature(
+        self,
+        feature_key: str,
+        *,
+        attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> Optional[FeatureResult]:
+        """Resolve a single feature by key for this visitor.
+
+        Resolves the feature locally from the visitor's selected variation —
+        reading the variation's ``fullStackFeature`` change and casting the
+        feature's variables by their declared types. Request-time ``attributes``
+        / ``location_attributes`` overlay the stored context state for this call
+        only. Returns a typed
+        :class:`~convert_sdk.domain.results.FeatureResult` when the feature is
+        declared and the visitor buckets into a variation carrying its change,
+        or ``None`` for any normal miss (undeclared/unavailable/disabled feature,
+        unqualified visitor). Never raises for normal evaluation outcomes and
+        performs no network I/O.
+        """
+        visitor_attributes = self._merge(self._attributes, attributes)
+        location = self._merge(self._location_attributes, location_attributes)
+        return resolve_feature(
+            feature_key,
+            self._snapshot,
+            visitor_id=self._visitor_id,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location,
+        )
+
+    def run_features(
+        self,
+        *,
+        attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> List[FeatureResult]:
+        """Resolve all applicable features for this visitor.
+
+        Returns one typed result per declared feature the visitor resolves to an
+        enabled state; features the visitor does not bucket into are omitted (no
+        ``None`` entries). Evaluation stays local to the snapshot — no network
+        I/O.
+        """
+        visitor_attributes = self._merge(self._attributes, attributes)
+        location = self._merge(self._location_attributes, location_attributes)
+        return resolve_features(
+            self._snapshot,
+            visitor_id=self._visitor_id,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location,
+        )
