@@ -1,0 +1,15 @@
+{
+  "account_id": "100123",
+  "project": {
+    "id": "200456",
+    "key": "proj-key"
+  },
+  "experiences": [],
+  "features": [],
+  "goals": [
+    {"id": "g1", "key": "purchase_completed"},
+    {"id": "g2", "key": "signup"}
+  ],
+  "audiences": [],
+  "segments": []
+}
