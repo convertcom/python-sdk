@@ -17,6 +17,27 @@ Nothing here performs network I/O, batching, deduplication, or flush control.
 """
 
 from convert_sdk.tracking.conversions import create_conversion
+from convert_sdk.tracking.deduplication import DedupDecision, evaluate_dedup
+from convert_sdk.tracking.flush import (
+    flush,
+    register_atexit_flush,
+    setup_periodic_flush,
+)
 from convert_sdk.tracking.payloads import TRACKING_SOURCE, build_tracking_payload
+from convert_sdk.tracking.queue import ReleaseReason, TrackingQueue
+from convert_sdk.tracking.tracker import Tracker
 
-__all__ = ["create_conversion", "build_tracking_payload", "TRACKING_SOURCE"]
+__all__ = [
+    "create_conversion",
+    "build_tracking_payload",
+    "TRACKING_SOURCE",
+    # Story 2.3 tracking internals.
+    "TrackingQueue",
+    "ReleaseReason",
+    "DedupDecision",
+    "evaluate_dedup",
+    "Tracker",
+    "flush",
+    "setup_periodic_flush",
+    "register_atexit_flush",
+]

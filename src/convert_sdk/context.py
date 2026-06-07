@@ -34,6 +34,7 @@ from convert_sdk.tracking.conversions import create_conversion
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
+    from convert_sdk.tracking.tracker import Tracker
 
 
 class Context:
@@ -62,6 +63,7 @@ class Context:
         *,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
+        tracker: Optional["Tracker"] = None,
     ) -> None:
         # Visitor identity + stored attributes + snapshot linkage live in the
         # typed ContextState (visitor state stays separate from the snapshot).
@@ -71,6 +73,9 @@ class Context:
             visitor_attributes=visitor_attributes,
         )
         self._snapshot = snapshot
+        # Story 2.3: shared tracking orchestrator (dedup + queue). When None,
+        # track_conversion falls back to stateless create_conversion.
+        self._tracker = tracker
         # Location is a context-local overlay, not part of ContextState.
         self._location_attributes: Mapping[str, Any] = MappingProxyType(
             dict(location_attributes or {})
@@ -231,42 +236,60 @@ class Context:
         *,
         revenue: Optional[float] = None,
         conversion_data: Optional[Mapping[str, Any]] = None,
+        force_multiple: bool = False,
     ) -> ConversionResult:
-        """Track a goal conversion for this visitor (Stories 2.1 + 2.2).
+        """Track a goal conversion for this visitor (Stories 2.1 + 2.2 + 2.3).
 
         Resolves ``goal_key`` against the current immutable snapshot and creates
         an in-process conversion event associated with this visitor and the
-        resolved goal identity. Story 2.2 extends the Story 2.1 goal-key-only
-        surface with optional ``revenue`` and caller-supplied ``conversion_data``
-        keyword arguments, and carries the visitor's attribution context (active
-        segments + active variation/bucketing assignments) into the internal
-        event (AC#1, FR33, FR34). The signature stays forward-compatible: the
-        canonical PRD ``force_multiple`` argument and deduplication semantics are
-        reserved for Story 2.3 and are intentionally not implemented here.
+        resolved goal identity, carrying the visitor's attribution context
+        (active segments + active variation/bucketing assignments) (AC#1, FR33,
+        FR34). Story 2.3 activates the canonical PRD ``force_multiple`` keyword
+        and routes the call through the shared tracker (dedup + batch queue) when
+        one is configured (i.e. when the context was created via ``Core``).
+
+        Deduplication is keyed by ``(visitor_id, goal_id)`` and is by goal
+        identity, not payload content — a differing ``revenue`` /
+        ``conversion_data`` does NOT defeat dedup. ``force_multiple=True``
+        overrides dedup to re-track an already-tracked goal (re-sending the
+        transaction/``goalData`` path, JS parity).
 
         Returns a typed
         :class:`~convert_sdk.domain.results.ConversionResult`:
 
-        * ``status == ConversionStatus.QUEUED`` — the goal resolved and an event
-          was created (``result.event`` carries the
-          :class:`~convert_sdk.domain.results.ConversionEvent`, including any
-          revenue/conversion_data and attribution context).
-        * ``status == ConversionStatus.GOAL_NOT_FOUND`` — the goal key is absent
-          from the loaded config. This is a diagnosable NON-EXCEPTION outcome
-          (FR50), distinguishable from success via ``status`` alone — callers
-          never need ``try``/``except`` to tell the two apart.
+        * ``status == QUEUED`` (``tracked=True``, ``reason=None``) — the goal
+          resolved and an event was enqueued.
+        * ``status == DEDUPLICATED`` (``tracked=False``,
+          ``reason="deduplicated"``) — a default-mode duplicate for an
+          already-tracked ``(visitor_id, goal_id)``; no second event enqueued.
+        * ``status == GOAL_NOT_FOUND`` (``tracked=False``,
+          ``reason="goal_not_found"``) — the goal key is absent from the loaded
+          config. A diagnosable NON-EXCEPTION outcome (FR50).
+
+        When the context has no shared tracker (constructed directly rather than
+        via ``Core``), tracking falls back to the stateless Story 2.1/2.2
+        ``create_conversion`` — no dedup, no queue (``force_multiple`` has no
+        effect in that fallback path).
 
         Raises:
             ConversionDataError: if a ``conversion_data`` value is not a JSON
-                primitive (nested objects/lists/arbitrary types). Programmer
-                misuse fails fast at enqueue time and is never silently
-                downgraded to a no-result — distinct from the unknown-goal
-                NON-EXCEPTION outcome (AC#3).
+                primitive. Programmer misuse fails fast and is never silently
+                downgraded to a no-result (AC#3).
 
-        Performs no network I/O and no payload serialization; event delivery,
-        payload shaping, batching, deduplication, and flush land in later Epic 2
-        stories.
+        The enqueue path performs no network I/O and stays lightweight (NFR5);
+        delivery happens at flush time (``Core.flush()``).
         """
+        if self._tracker is not None:
+            return self._tracker.track(
+                visitor_id=self._state.visitor_id,
+                goal_key=goal_key,
+                revenue=revenue,
+                conversion_data=conversion_data,
+                visitor_attributes=self._state.visitor_attributes,
+                force_multiple=force_multiple,
+            )
+        # Fallback: stateless create_conversion (no dedup/queue) for a Context
+        # constructed without a shared tracker.
         return create_conversion(
             self._snapshot,
             visitor_id=self._state.visitor_id,

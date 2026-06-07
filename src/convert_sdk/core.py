@@ -42,6 +42,12 @@ class Core:
         self._owns_transport = False
         self._snapshot: Optional[ConfigSnapshot] = None
         self._ready = False
+        # Story 2.3: the shared tracker (queue + dedup + flush) is created at
+        # initialize() once the snapshot is available, and shared by every
+        # context Core creates so dedup/batching are process-consistent.
+        self._tracker: Optional[Any] = None
+        # Opt-in daemonic periodic-flush driver (None unless configured).
+        self._periodic_flusher: Optional[Any] = None
 
     # --- readiness & config access ----------------------------------------
 
@@ -94,7 +100,25 @@ class Core:
             self._snapshot,
             visitor_attributes=visitor_attributes,
             location_attributes=location_attributes,
+            tracker=self._tracker,
         )
+
+    # --- tracking flush ----------------------------------------------------
+
+    def flush(self) -> None:
+        """Explicitly release the tracking queue and deliver queued events.
+
+        Drains the shared queue through the single release path, serializes the
+        batched per-visitor events via the Story 2.2 serializer, and delivers
+        through the configured transport, clearing the queue on success. A flush
+        on an empty queue is a safe no-op (no transport call, no error). This is
+        the canonical, deterministic control point for queue release (FR39); the
+        default lifecycle is explicit-flush-only.
+
+        Safe to call before :meth:`initialize` (no tracker yet) — it is a no-op.
+        """
+        if self._tracker is not None:
+            self._tracker.flush()
 
     # --- initialization ----------------------------------------------------
 
@@ -114,8 +138,31 @@ class Core:
         raw = self._load_raw_config()
         # load_snapshot validates + normalizes; any failure leaves us not-ready.
         self._snapshot = load_snapshot(raw)
+        self._build_tracker()
         self._ready = True
         return self
+
+    def _build_tracker(self) -> None:
+        """Create the shared tracking orchestrator from the loaded snapshot.
+
+        Lazy-imported so the tracking layer (and httpx, via the transport
+        provider) stays off the import path for callers that never track.
+        """
+        from convert_sdk.tracking.flush import setup_periodic_flush
+        from convert_sdk.tracking.tracker import Tracker
+
+        assert self._snapshot is not None
+        self._tracker = Tracker(
+            snapshot=self._snapshot,
+            config=self._config,
+            transport=self._transport,
+            transport_provider=self._ensure_transport,
+        )
+        # Opt-in periodic flush (daemonic timer) when configured; default
+        # (interval None) keeps the lifecycle explicit-flush-only.
+        self._periodic_flusher = setup_periodic_flush(
+            self._tracker, self._config.auto_flush_interval_ms
+        )
 
     def _load_raw_config(self) -> Dict[str, Any]:
         if self._config.is_direct_config:
@@ -141,7 +188,16 @@ class Core:
     # --- lifecycle ---------------------------------------------------------
 
     def close(self) -> None:
-        """Release resources. Closes the transport only if Core created it."""
+        """Release resources. Closes the transport only if Core created it.
+
+        Cancels the opt-in periodic-flush timer (if any) so the daemonic thread
+        stops rescheduling. Does NOT perform a final flush — explicit flush and
+        the best-effort ``atexit`` hook are the documented shutdown-delivery
+        paths.
+        """
+        if self._periodic_flusher is not None:
+            self._periodic_flusher.cancel()
+            self._periodic_flusher = None
         if self._transport is not None and self._owns_transport:
             self._transport.close()
             self._transport = None
