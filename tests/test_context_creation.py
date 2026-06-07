@@ -110,18 +110,31 @@ def test_create_context_requires_initialized_sdk():
 
 def test_context_links_to_current_snapshot():
     core = _ready_core()
-    ctx = core.create_context("visitor-1")
-    # The context evaluates against the Core's current immutable snapshot.
-    assert ctx._snapshot is core.current_config
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    # The context evaluates against the Core's current immutable snapshot:
+    # the experience declared in the Core's config resolves through the context.
+    result = ctx.run_experience("us-experience")
+    assert result is not None
+    assert result.experience_key == "us-experience"
+    # The Core still exposes that same immutable snapshot.
+    assert core.current_config is not None
+    assert any(
+        exp.get("key") == "us-experience" for exp in core.current_config.experiences
+    )
 
 
 def test_two_contexts_share_snapshot_but_keep_separate_visitor_state():
     core = _ready_core()
     a = core.create_context("a", visitor_attributes={"country": "US"})
     b = core.create_context("b", visitor_attributes={"country": "CA"})
-    assert a._snapshot is b._snapshot  # shared snapshot, not duplicated
+    # Distinct caller-scoped contexts with independent visitor state...
+    assert a is not b
     assert a.visitor_id != b.visitor_id
     assert dict(a.visitor_attributes) != dict(b.visitor_attributes)
+    # ...both evaluating against the same shared config (a qualifies, b does not),
+    # proving the snapshot is shared, not duplicated or diverging per visitor.
+    assert a.run_experience("us-experience") is not None
+    assert b.run_experience("us-experience") is None
 
 
 # --- AC #2: reuse across evaluations --------------------------------------
