@@ -50,3 +50,17 @@ def test_frozen_story_1_1_boundary_still_public():
     # Internal module names must not appear as re-exported public attributes.
     for internal in ("core", "context", "version", "config", "errors"):
         assert internal not in declared
+
+
+def test_story_1_4_exposes_experience_result_additively():
+    """Story 1.4 adds ExperienceResult to the public surface without dropping
+    the frozen Story 1.1 trio."""
+    from convert_sdk import ExperienceResult  # noqa: F401
+
+    declared = set(convert_sdk.__all__)
+    assert "ExperienceResult" in declared
+    # Frozen trio still present.
+    assert {"Core", "Context", "__version__"}.issubset(declared)
+    # Internal evaluation modules must not leak into the public surface.
+    for internal in ("evaluation", "results", "bucketing", "rules", "experiences"):
+        assert internal not in declared
