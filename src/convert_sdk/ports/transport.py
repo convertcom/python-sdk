@@ -19,11 +19,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 @runtime_checkable
 class Transport(Protocol):
-    """Fetches raw config payloads for the SDK.
+    """Fetches raw config payloads and delivers tracking events for the SDK.
 
     Implementations must enforce TLS-only transport (NFR8), apply the JS-parity
-    config route shape, and raise
-    :class:`~convert_sdk.errors.ConfigLoadError` on fetch failures.
+    config and tracking route shapes, and raise
+    :class:`~convert_sdk.errors.ConfigLoadError` on config-fetch failures and a
+    typed :class:`~convert_sdk.errors.ConvertSDKError` on tracking-delivery
+    failures.
     """
 
     def fetch_config(self, config: "SDKConfig") -> Dict[str, Any]:
@@ -32,6 +34,18 @@ class Transport(Protocol):
         Returns the decoded JSON body as a dict. Raises
         :class:`~convert_sdk.errors.ConfigLoadError` on any transport/HTTP/decode
         failure.
+        """
+        ...
+
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:
+        """Deliver a serialized tracking-events batch over HTTPS (Story 2.3).
+
+        POSTs ``payload`` (the verbose JS-SDK batch envelope produced by
+        ``tracking/payloads.py``) to the JS-parity route ``/track/{sdkKey}``.
+        Performs no retry/backoff — transport-level retries (if any) live in the
+        adapter, and the tracking layer calls this exactly once per release.
+        Raises a typed :class:`~convert_sdk.errors.ConvertSDKError` (subclass) on
+        any transport/HTTP failure so the caller can leave the queue intact.
         """
         ...
 
