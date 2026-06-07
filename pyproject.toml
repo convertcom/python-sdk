@@ -42,7 +42,16 @@ include = [
     "src/convert_sdk",
     "README.md",
     "pyproject.toml",
+    # Ship the runnable quickstart examples in the source distribution so the
+    # onboarding path travels with the package (Story 1.6).
+    "examples",
 ]
+
+[tool.pytest.ini_options]
+# Put the project root on sys.path so the runnable quickstart examples in
+# examples/ are importable as the `examples` package from the drift-protection
+# tests (tests/test_examples.py), without requiring PYTHONPATH to be set in CI.
+pythonpath = ["."]
 
 [dependency-groups]
 dev = [

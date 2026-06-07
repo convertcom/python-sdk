@@ -21,7 +21,14 @@ from typing import Any, Dict
 
 from convert_sdk import Core, SDKConfig
 
-from examples._sample_config import SAMPLE_CONFIG
+try:  # Runnable both as a script (python examples/x.py) and as a package import.
+    from examples._sample_config import SAMPLE_CONFIG
+except ModuleNotFoundError:  # pragma: no cover - script-invocation fallback
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from examples._sample_config import SAMPLE_CONFIG
 
 
 def run() -> Dict[str, Any]:
