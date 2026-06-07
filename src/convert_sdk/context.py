@@ -26,6 +26,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
+from convert_sdk.domain.context_state import ContextState
 from convert_sdk.domain.results import ExperienceResult, FeatureResult
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
@@ -37,12 +38,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 class Context:
     """Per-visitor evaluation context for the Convert Python SDK.
 
+    Per-visitor state (identity + stored visitor attributes + the link to the
+    current immutable snapshot) lives in a typed
+    :class:`~convert_sdk.domain.context_state.ContextState`, keeping visitor
+    state separate from the shared snapshot. Location attributes remain a
+    context-local overlay concern and are not part of that visitor-state model.
+
     Args:
         visitor_id: The stable visitor identity used for deterministic bucketing.
         snapshot: The immutable config snapshot to evaluate against.
-        attributes: Optional stored visitor attributes (e.g. audience traits).
-            Copied defensively so later caller mutations never affect the
-            context.
+        visitor_attributes: Optional stored visitor attributes (e.g. audience
+            traits). Copied defensively so later caller mutations never affect
+            the context.
         location_attributes: Optional stored location attributes (e.g. URL /
             site-area context) used for location-rule qualification.
     """
@@ -52,13 +59,18 @@ class Context:
         visitor_id: str,
         snapshot: "ConfigSnapshot",
         *,
-        attributes: Optional[Mapping[str, Any]] = None,
+        visitor_attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        self._visitor_id = visitor_id
+        # Visitor identity + stored attributes + snapshot linkage live in the
+        # typed ContextState (visitor state stays separate from the snapshot).
+        self._state = ContextState(
+            visitor_id=visitor_id,
+            snapshot=snapshot,
+            visitor_attributes=visitor_attributes,
+        )
         self._snapshot = snapshot
-        # Store immutable copies so caller-side mutation cannot leak in.
-        self._attributes: Mapping[str, Any] = MappingProxyType(dict(attributes or {}))
+        # Location is a context-local overlay, not part of ContextState.
         self._location_attributes: Mapping[str, Any] = MappingProxyType(
             dict(location_attributes or {})
         )
@@ -66,12 +78,21 @@ class Context:
     @property
     def visitor_id(self) -> str:
         """The visitor identity bound to this context."""
-        return self._visitor_id
+        return self._state.visitor_id
+
+    @property
+    def visitor_attributes(self) -> Mapping[str, Any]:
+        """A read-only view of the stored visitor attributes (Pythonic name)."""
+        return self._state.visitor_attributes
 
     @property
     def attributes(self) -> Mapping[str, Any]:
-        """A read-only view of the stored visitor attributes."""
-        return self._attributes
+        """A read-only view of the stored visitor attributes.
+
+        Retained alias for :attr:`visitor_attributes`; both expose the same
+        read-only stored visitor state.
+        """
+        return self._state.visitor_attributes
 
     # --- evaluation surface ------------------------------------------------
 
@@ -106,12 +127,12 @@ class Context:
         (missing experience, unqualified visitor, no active variation). Never
         raises for normal evaluation outcomes and performs no network I/O.
         """
-        visitor_attributes = self._merge(self._attributes, attributes)
+        visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
         return select_experience(
             experience_key,
             self._snapshot,
-            visitor_id=self._visitor_id,
+            visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
         )
@@ -129,7 +150,7 @@ class Context:
         omitted (no ``None`` entries). Evaluation stays local to the snapshot —
         no network I/O.
         """
-        visitor_attributes = self._merge(self._attributes, attributes)
+        visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
         results: List[ExperienceResult] = []
         for experience in self._snapshot.experiences:
@@ -139,7 +160,7 @@ class Context:
             result = select_experience(
                 str(key),
                 self._snapshot,
-                visitor_id=self._visitor_id,
+                visitor_id=self._state.visitor_id,
                 visitor_attributes=visitor_attributes,
                 location_attributes=location,
             )
@@ -169,12 +190,12 @@ class Context:
         unqualified visitor). Never raises for normal evaluation outcomes and
         performs no network I/O.
         """
-        visitor_attributes = self._merge(self._attributes, attributes)
+        visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
         return resolve_feature(
             feature_key,
             self._snapshot,
-            visitor_id=self._visitor_id,
+            visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
         )
@@ -192,11 +213,11 @@ class Context:
         ``None`` entries). Evaluation stays local to the snapshot — no network
         I/O.
         """
-        visitor_attributes = self._merge(self._attributes, attributes)
+        visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
         return resolve_features(
             self._snapshot,
-            visitor_id=self._visitor_id,
+            visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
         )
