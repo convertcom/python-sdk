@@ -50,6 +50,25 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # backend confirms a ``python-sdk`` allowlist entry) is a one-line change.
 TRACKING_SOURCE: str = "js-sdk"
 
+# The ``VisitorSegments`` key allowlist from the JS type
+# (`types.gen.ts:2537-2573`). The wire ``segments`` field is a STRUCTURED object
+# with this fixed key set — NOT a free-form dict of arbitrary visitor traits.
+# Raw caller attributes carried on the internal event for attribution are
+# filtered to this allowlist at the serializer boundary so non-segment traits
+# never leak onto the wire and break NFR21 parity. (Proper segment derivation
+# lands with the persisted segment store in Story 3.3.)
+_VISITOR_SEGMENT_KEYS = frozenset(
+    {
+        "browser",
+        "devices",
+        "source",
+        "campaign",
+        "visitorType",
+        "country",
+        "customSegments",
+    }
+)
+
 # The ``goalData`` key allowlist from the JS ``ConversionEvent`` type
 # (`types.gen.ts:2509-2511`). Caller ``conversion_data`` keys outside this set
 # are NOT part of the wire ``ConversionEvent`` contract and are dropped from the
@@ -123,12 +142,31 @@ def _build_conversion_event_data(event: ConversionEvent) -> Dict[str, Any]:
     return data
 
 
+def _build_visitor_segments(event: ConversionEvent) -> Dict[str, Any]:
+    """Filter the internal attribution segments to the wire ``VisitorSegments``.
+
+    The internal ``event.segments`` may carry richer caller attributes for
+    attribution, but the wire ``segments`` field is the structured JS
+    ``VisitorSegments`` type with a fixed key set. Only allowlisted keys are
+    emitted; non-segment traits are dropped so they never reach the backend.
+    """
+    if not event.segments:
+        return {}
+    return {
+        key: value
+        for key, value in event.segments.items()
+        if key in _VISITOR_SEGMENT_KEYS
+    }
+
+
 def _build_visitor_entry(event: ConversionEvent) -> Dict[str, Any]:
     """Build a single ``visitors[]`` entry: ``{visitorId, segments?, events}``."""
     visitor: Dict[str, Any] = {"visitorId": event.visitor_id}
 
-    if event.segments:
-        visitor["segments"] = dict(event.segments)
+    segments = _build_visitor_segments(event)
+    if segments:
+        # Omit entirely (never {}) when no allowlisted segment key is present.
+        visitor["segments"] = segments
 
     visitor["events"] = [
         {

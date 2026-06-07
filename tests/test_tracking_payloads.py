@@ -204,6 +204,12 @@ def test_bucketing_data_omitted_when_empty():
 
 
 # --- segments on the visitor entry ---------------------------------------
+#
+# The wire ``segments`` field is the structured JS ``VisitorSegments`` type
+# (types.gen.ts:2537-2573) with a FIXED key set — not a free-form dict of
+# arbitrary visitor traits. The serializer filters to the allowlist so that
+# non-segment attributes (e.g. an app-specific "plan" trait) never leak onto the
+# wire and break NFR21 parity.
 
 
 def test_visitor_segments_serialized_when_present():
@@ -212,6 +218,25 @@ def test_visitor_segments_serialized_when_present():
         snap, _event(segments={"country": "US"})
     )["visitors"][0]
     assert visitor["segments"] == {"country": "US"}
+
+
+def test_visitor_segments_filtered_to_visitor_segments_allowlist():
+    # Non-VisitorSegments keys (raw visitor traits) are dropped from the wire.
+    snap = _snapshot()
+    visitor = build_tracking_payload(
+        snap, _event(segments={"country": "US", "plan": "pro"})
+    )["visitors"][0]
+    assert visitor["segments"] == {"country": "US"}
+    assert "plan" not in visitor["segments"]
+
+
+def test_visitor_segments_omitted_when_no_allowlisted_key():
+    # All-non-segment attributes -> the wire segments field is omitted entirely.
+    snap = _snapshot()
+    visitor = build_tracking_payload(
+        snap, _event(segments={"plan": "pro"})
+    )["visitors"][0]
+    assert "segments" not in visitor
 
 
 def test_visitor_segments_omitted_when_absent():
@@ -231,7 +256,7 @@ def test_payload_is_json_serializable_and_matches_js_sdk_field_set():
             revenue=10.0,
             conversion_data={"transactionId": "tx-1"},
             bucketing_assignments={"e1": "v1"},
-            segments={"plan": "pro"},
+            segments={"country": "US"},
         ),
     )
     # Round-trips through JSON unchanged (no non-serializable values leak).
