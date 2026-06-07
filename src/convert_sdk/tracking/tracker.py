@@ -45,7 +45,7 @@ from convert_sdk.domain.results import (
 from convert_sdk.ports.storage import DataStore, resolve_data_store
 from convert_sdk.tracking.conversions import create_conversion
 from convert_sdk.tracking.deduplication import evaluate_dedup
-from convert_sdk.tracking.payloads import _build_goal_data, build_tracking_payload
+from convert_sdk.tracking.payloads import build_tracking_payload, event_has_goal_data
 from convert_sdk.tracking.queue import ReleaseReason, TrackingQueue, VisitorQueueItem
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -124,10 +124,10 @@ class Tracker:
 
         event = result.event
         # goalData presence drives the transaction-send branch (F-006). It is
-        # computed via the Story 2.2 serializer helper so "has goalData" matches
-        # exactly what would be serialized on the wire (revenue or allowlisted
-        # conversion_data keys).
-        has_goal_data = bool(_build_goal_data(event))
+        # computed via the Story 2.2 serializer predicate so "has goalData"
+        # matches exactly what would be serialized on the wire (revenue or
+        # allowlisted conversion_data keys).
+        has_goal_data = event_has_goal_data(event)
 
         decision = evaluate_dedup(
             self._store,

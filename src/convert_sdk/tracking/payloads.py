@@ -118,6 +118,17 @@ def _build_goal_data(event: ConversionEvent) -> List[Dict[str, Any]]:
     return entries
 
 
+def event_has_goal_data(event: ConversionEvent) -> bool:
+    """Whether the event would serialize any ``goalData`` entries on the wire.
+
+    Public predicate (Story 2.3) so the tracker can decide the transaction-send
+    branch (F-006) using EXACTLY the serializer's notion of "has goalData" —
+    revenue or any allowlisted ``conversion_data`` key — without reaching into a
+    private serializer helper.
+    """
+    return bool(_build_goal_data(event))
+
+
 def _build_conversion_event_data(event: ConversionEvent) -> Dict[str, Any]:
     """Serialize the internal event to the JS ``ConversionEvent`` wire shape.
 
