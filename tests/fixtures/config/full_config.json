@@ -1,0 +1,25 @@
+{
+  "account_id": "100123",
+  "project": {
+    "id": "200456",
+    "key": "proj-key"
+  },
+  "experiences": [
+    {
+      "id": "e1",
+      "key": "exp-one",
+      "variations": [
+        {"id": "v1", "key": "var-one"},
+        {"id": "v2", "key": "var-two"}
+      ]
+    }
+  ],
+  "features": [],
+  "goals": [
+    {"id": "g1", "key": "purchase_completed"},
+    {"id": "g2", "key": "signup"},
+    {"id": "g3", "key": "add_to_cart"}
+  ],
+  "audiences": [],
+  "segments": []
+}

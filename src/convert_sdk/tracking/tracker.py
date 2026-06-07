@@ -199,23 +199,37 @@ class Tracker:
         """Serialize all drained per-visitor items into ONE batch envelope.
 
         Reuses the Story 2.2 ``build_tracking_payload`` serializer (single
-        serialization path, NFR21 parity) for each event, then merges the
-        per-visitor ``visitors[]`` entries into a single envelope so the whole
-        batch is delivered in one POST (JS releaseQueue batch shape).
+        serialization path, NFR21 parity) for each event, then **merges events
+        belonging to the same visitor into a single ``visitors[]`` entry** so the
+        batch matches the JS ``VisitorsQueue`` grouping (``api-manager.ts``):
+        one entry per visitor carrying all of that visitor's events. The stable
+        envelope fields (``accountId`` / ``projectId`` / ``source`` /
+        ``enrichData``) come from the serializer so they are computed exactly
+        once and never re-derived in the flush path (no second serializer).
         """
-        visitors: List[dict] = []
+        # visitor_id -> merged visitors[] entry (preserving insertion order).
+        merged: "dict[str, dict]" = {}
+        envelope: Optional[dict] = None
         for item in items:
             for event in item.events:
                 single = build_tracking_payload(
                     self._snapshot, event, data_store=self._config.data_store
                 )
-                visitors.extend(single["visitors"])
-        # Take the stable envelope fields from the serializer's first build.
-        first = build_tracking_payload(
-            self._snapshot, items[0].events[0], data_store=self._config.data_store
-        )
-        first["visitors"] = visitors
-        return first
+                if envelope is None:
+                    envelope = single
+                for visitor in single["visitors"]:
+                    vid = visitor["visitorId"]
+                    existing = merged.get(vid)
+                    if existing is None:
+                        merged[vid] = visitor
+                    else:
+                        existing["events"].extend(visitor["events"])
+                        # Latest non-empty segments win (matches queue grouping).
+                        if visitor.get("segments"):
+                            existing["segments"] = visitor["segments"]
+        assert envelope is not None  # items is non-empty (checked by caller)
+        envelope["visitors"] = list(merged.values())
+        return envelope
 
     def _ensure_transport(self) -> "Transport":
         if self._transport is None:
