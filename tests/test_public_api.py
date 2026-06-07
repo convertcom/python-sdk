@@ -64,3 +64,16 @@ def test_story_1_4_exposes_experience_result_additively():
     # Internal evaluation modules must not leak into the public surface.
     for internal in ("evaluation", "results", "bucketing", "rules", "experiences"):
         assert internal not in declared
+
+
+def test_feature_result_and_status_exposed_additively():
+    """The minimal feature-resolution foundation adds FeatureResult and
+    FeatureStatus to the public surface without dropping the frozen trio."""
+    from convert_sdk import FeatureResult, FeatureStatus  # noqa: F401
+
+    declared = set(convert_sdk.__all__)
+    assert "FeatureResult" in declared
+    assert "FeatureStatus" in declared
+    assert {"Core", "Context", "__version__"}.issubset(declared)
+    for internal in ("features",):
+        assert internal not in declared
