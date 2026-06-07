@@ -225,30 +225,53 @@ class Context:
 
     # --- conversion tracking -----------------------------------------------
 
-    def track_conversion(self, goal_key: str) -> ConversionResult:
-        """Track a goal conversion for this visitor (Story 2.1).
+    def track_conversion(
+        self,
+        goal_key: str,
+        *,
+        revenue: Optional[float] = None,
+        conversion_data: Optional[Mapping[str, Any]] = None,
+    ) -> ConversionResult:
+        """Track a goal conversion for this visitor (Stories 2.1 + 2.2).
 
         Resolves ``goal_key`` against the current immutable snapshot and creates
         an in-process conversion event associated with this visitor and the
-        resolved goal identity. Returns a typed
+        resolved goal identity. Story 2.2 extends the Story 2.1 goal-key-only
+        surface with optional ``revenue`` and caller-supplied ``conversion_data``
+        keyword arguments, and carries the visitor's attribution context (active
+        segments + active variation/bucketing assignments) into the internal
+        event (AC#1, FR33, FR34). The signature stays forward-compatible: the
+        canonical PRD ``force_multiple`` argument and deduplication semantics are
+        reserved for Story 2.3 and are intentionally not implemented here.
+
+        Returns a typed
         :class:`~convert_sdk.domain.results.ConversionResult`:
 
         * ``status == ConversionStatus.QUEUED`` — the goal resolved and an event
           was created (``result.event`` carries the
-          :class:`~convert_sdk.domain.results.ConversionEvent`).
+          :class:`~convert_sdk.domain.results.ConversionEvent`, including any
+          revenue/conversion_data and attribution context).
         * ``status == ConversionStatus.GOAL_NOT_FOUND`` — the goal key is absent
           from the loaded config. This is a diagnosable NON-EXCEPTION outcome
           (FR50), distinguishable from success via ``status`` alone — callers
           never need ``try``/``except`` to tell the two apart.
 
+        Raises:
+            ConversionDataError: if a ``conversion_data`` value is not a JSON
+                primitive (nested objects/lists/arbitrary types). Programmer
+                misuse fails fast at enqueue time and is never silently
+                downgraded to a no-result — distinct from the unknown-goal
+                NON-EXCEPTION outcome (AC#3).
+
         Performs no network I/O and no payload serialization; event delivery,
         payload shaping, batching, deduplication, and flush land in later Epic 2
-        stories. The Story 2.1 surface is goal-key only; richer conversion
-        attributes (e.g. revenue) arrive in Story 2.2 as additional keyword
-        arguments, keeping this signature forward-compatible.
+        stories.
         """
         return create_conversion(
             self._snapshot,
             visitor_id=self._state.visitor_id,
             goal_key=goal_key,
+            revenue=revenue,
+            conversion_data=conversion_data,
+            visitor_attributes=self._state.visitor_attributes,
         )
