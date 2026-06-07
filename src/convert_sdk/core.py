@@ -13,10 +13,11 @@ later stories. The public API is sync-first for MVP.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
 from convert_sdk.config import SDKConfig
 from convert_sdk.config_loader import load_snapshot
+from convert_sdk.context import Context
 from convert_sdk.domain.config_snapshot import ConfigSnapshot
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -53,6 +54,36 @@ class Core:
     def current_config(self) -> Optional[ConfigSnapshot]:
         """The current immutable config snapshot, or ``None`` if not ready."""
         return self._snapshot
+
+    # --- visitor context ---------------------------------------------------
+
+    def create_context(
+        self,
+        visitor_id: str,
+        attributes: Optional[Mapping[str, Any]] = None,
+        *,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> Context:
+        """Create a visitor-scoped :class:`~convert_sdk.context.Context`.
+
+        The context evaluates against the current immutable snapshot. Attributes
+        are copied into the context defensively; later caller mutations do not
+        affect it. Requires the SDK to be initialized.
+
+        Raises:
+            RuntimeError: if called before :meth:`initialize` (no snapshot).
+        """
+        if self._snapshot is None:
+            raise RuntimeError(
+                "Core must be initialized before creating a context "
+                "(call initialize() first)."
+            )
+        return Context(
+            visitor_id,
+            self._snapshot,
+            attributes=attributes,
+            location_attributes=location_attributes,
+        )
 
     # --- initialization ----------------------------------------------------
 

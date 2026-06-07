@@ -19,6 +19,7 @@ Story 1.1 boundary.
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.context import Context
 from convert_sdk.core import Core
+from convert_sdk.domain.results import ExperienceResult
 from convert_sdk.errors import (
     ConfigError,
     ConfigLoadError,
@@ -42,4 +43,6 @@ __all__ = [
     "InvalidConfigError",
     "ConfigLoadError",
     "TransportError",
+    # Story 1.4 typed evaluation result.
+    "ExperienceResult",
 ]
