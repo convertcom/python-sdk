@@ -21,6 +21,25 @@ import pytest
 
 from convert_sdk import Context, Core, SDKConfig
 
+
+class _RecordingStore:
+    """Duck-typed DataStore that records writes (for persist assertions)."""
+
+    def __init__(self) -> None:
+        self._d: dict = {}
+
+    def get(self, key):
+        return self._d.get(key)
+
+    def set(self, key, value, ttl=None):
+        self._d[key] = value
+
+    def has(self, key):
+        return key in self._d
+
+    def delete(self, key):
+        self._d.pop(key, None)
+
 CONFIG = {
     "account_id": "100123",
     "project": {"id": "200456"},
@@ -299,3 +318,87 @@ def test_set_attributes_does_not_mutate_config_snapshot():
     # update (Critical Warning #1) — same object, same contents.
     assert ctx._state.snapshot is snapshot_before  # noqa: SLF001
     assert [e.get("key") for e in core.current_config.experiences] == exp_keys_before
+
+
+# --- Story 3.2 AC #2/#3: persist through DataStore + rehydrate --------------
+
+
+def _store_core(store) -> Core:
+    return Core(SDKConfig(data=CONFIG, data_store=store)).initialize()
+
+
+def test_set_attributes_persists_through_injected_store():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a", visitor_attributes={"country": "CA"})
+    ctx.set_attributes({"country": "US", "tier": "gold"})
+
+    # The merged state is written through the injected DataStore under a
+    # visitor-scoped state key (never a dedup key, never a Core-global key).
+    state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    assert len(state_keys) == 1
+    persisted = store.get(state_keys[0])
+    # The persisted value is the merged plain attribute dict.
+    assert dict(persisted) == {"country": "US", "tier": "gold"}
+
+
+def test_set_attributes_is_visitor_scoped_does_not_clobber_other_visitor():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx_a = core.create_context("v_a", visitor_attributes={"country": "CA"})
+    ctx_b = core.create_context("v_b", visitor_attributes={"country": "FR"})
+    ctx_a.set_attributes({"country": "US"})
+    # ctx_b's in-memory state is unaffected.
+    assert dict(ctx_b.visitor_attributes) == {"country": "FR"}
+    # The write targeted only v_a's key; v_b has no state write.
+    a_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    b_keys = [k for k in store._d if k.startswith("state:") and "v_b" in k]
+    assert len(a_keys) == 1
+    assert b_keys == []
+
+
+def test_fresh_create_context_rehydrates_persisted_update():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a", visitor_attributes={"country": "CA"})
+    ctx.set_attributes({"country": "US", "tier": "gold"})
+
+    # A freshly created context for the SAME visitor reflects the persisted
+    # update (rehydrated through the same DataStore + key), proving the mutation
+    # is routed through the persistence boundary, not held only on the original
+    # Python object (AC #3).
+    ctx2 = core.create_context("v_a")
+    assert dict(ctx2.visitor_attributes) == {"country": "US", "tier": "gold"}
+    # And the rehydrated visitor now qualifies for the US experience.
+    assert ctx2.run_experience("us-experience") is not None
+
+
+def test_rehydrate_does_not_leak_across_visitors():
+    store = _RecordingStore()
+    core = _store_core(store)
+    core.create_context("v_a", visitor_attributes={"country": "CA"}).set_attributes(
+        {"country": "US"}
+    )
+    # A different visitor with no persisted state hydrates empty (no leak).
+    ctx_b = core.create_context("v_b")
+    assert dict(ctx_b.visitor_attributes) == {}
+
+
+def test_set_attributes_without_store_is_safe_noop_persist():
+    # A Context constructed directly (no injected store) still rebinds state and
+    # does not raise — persistence is simply skipped.
+    core = Core(SDKConfig(data=CONFIG)).initialize()
+    ctx = Context("v_a", core.current_config, visitor_attributes={"country": "CA"})
+    ctx.set_attributes({"country": "US"})
+    assert dict(ctx.visitor_attributes) == {"country": "US"}
+
+
+def test_context_does_not_import_concrete_store():
+    # context.py must depend ONLY on the ports DataStore protocol (NFR19).
+    import inspect
+
+    import convert_sdk.context as context_mod
+
+    source = inspect.getsource(context_mod)
+    assert "adapters.storage.in_memory" not in source
+    assert "InMemoryDataStore" not in source
