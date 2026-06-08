@@ -63,7 +63,7 @@ def test_inner_layers_do_not_import_concrete_in_memory_store():
     for target in _FORBIDDEN_INNER:
         for path in _python_files(target):
             if _imports_concrete_adapter(path):
-                offenders.append(str(path.relative_to(_SRC)))
+                offenders.append(path.relative_to(_SRC).as_posix())
     assert offenders == [], (
         "L0/L1/L2 modules must not import the concrete InMemoryDataStore "
         f"(import-linter contract violated by: {offenders})"
@@ -84,7 +84,9 @@ def test_core_is_the_only_inner_concrete_adapter_import_site():
     }
     offenders = []
     for path in _SRC.rglob("*.py"):
-        rel = str(path.relative_to(_SRC))
+        # Normalize to forward slashes so the POSIX-style allow-list matches on
+        # Windows, where relative_to() yields backslash separators.
+        rel = path.relative_to(_SRC).as_posix()
         if rel in allowed:
             continue
         if _imports_concrete_adapter(path):

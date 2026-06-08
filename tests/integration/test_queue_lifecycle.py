@@ -100,7 +100,7 @@ _SCRIPT = textwrap.dedent(
                 "audiences": [], "segments": [],
             }}
         def send_tracking(self, payload, *, sdk_key):
-            with open(OUTFILE, "a") as fh:
+            with open(OUTFILE, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(payload) + "\\n")
         def close(self):
             pass
@@ -133,7 +133,11 @@ _SCRIPT = textwrap.dedent(
 def _run_scenario(tmp_path: Path, scenario: str) -> list:
     outfile = tmp_path / f"{scenario}.jsonl"
     script = tmp_path / f"{scenario}_run.py"
-    script.write_text(_SCRIPT.format())
+    # Write the generated script as UTF-8 explicitly: the template contains
+    # non-ASCII characters (em-dashes in comments), and on Windows the default
+    # encoding is cp1252, which would emit bytes the child interpreter cannot
+    # parse as UTF-8 source (SyntaxError: Non-UTF-8 code ...).
+    script.write_text(_SCRIPT.format(), encoding="utf-8")
     result = subprocess.run(
         [sys.executable, str(script), str(outfile), scenario],
         capture_output=True,
@@ -144,7 +148,11 @@ def _run_scenario(tmp_path: Path, scenario: str) -> list:
     assert result.returncode == 0, result.stderr
     if not outfile.exists():
         return []
-    return [json.loads(line) for line in outfile.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in outfile.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_atexit_scenario_attempts_final_delivery(tmp_path):
