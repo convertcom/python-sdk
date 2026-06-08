@@ -156,6 +156,44 @@ def test_config_load_error_masks_short_key_fully():
     assert "/config/***" in msg
 
 
+def test_config_load_error_uses_centralized_redaction_primitive():
+    """Story 4.1 Task 3 regression: errors.py repoints onto the SINGLE
+    ``_internal/redaction.py`` primitive (no second masking implementation),
+    and the redacted rendering is equal-or-stricter than the Story 1.2 shim —
+    the public contract (message + ``endpoint``/``status_code`` attrs) is
+    unchanged (the full ``SafeContext`` enrichment is Story 4.2)."""
+    from convert_sdk import ConfigLoadError
+    from convert_sdk._internal.redaction import redact_url
+
+    raw = "https://cdn.example.com/config/sdk_key_abcdef1234567890?token=secret"
+    err = ConfigLoadError("config fetch failed", endpoint=raw, status_code=503)
+
+    # The stored endpoint is exactly what the centralized primitive produces.
+    assert err.endpoint == redact_url(raw)
+    assert err.status_code == 503
+
+    msg = str(err)
+    assert "token=secret" not in msg
+    assert "?" not in msg
+    assert "sdk_key_abcdef1234567890" not in msg
+    assert "cdn.example.com/config/" in msg
+    assert "status=503" in msg
+
+
+def test_tracking_delivery_error_uses_centralized_redaction_primitive():
+    """The TrackingDeliveryError redaction is likewise repointed; public
+    contract (message + endpoint/status_code) unchanged."""
+    from convert_sdk import TrackingDeliveryError
+    from convert_sdk._internal.redaction import redact_url
+
+    raw = "https://cdn.example.com/track/sdk_key_abcdef1234567890?b=2"
+    err = TrackingDeliveryError("delivery failed", endpoint=raw, status_code=502)
+    assert err.endpoint == redact_url(raw)
+    assert err.status_code == 502
+    assert "sdk_key_abcdef1234567890" not in str(err)
+    assert "?" not in str(err)
+
+
 def test_error_hierarchy_is_typed_and_distinct():
     """Initialization errors must be a distinct, catchable typed hierarchy so
     they are distinguishable from normal (future) evaluation no-result paths."""

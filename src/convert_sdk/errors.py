@@ -15,58 +15,25 @@ Hierarchy::
     │   └── ConfigLoadError         (a config *fetch* failed)
     └── TransportError              (transport/TLS configuration failures)
 
-NFR23 redaction shim (qs-08 Reconciliation Note): until the centralized
-``_internal/redaction.py`` primitives land in Story 4.1/4.2, ``ConfigLoadError``
-applies a minimal inline redaction — endpoint URLs are reduced to ``host + path``
-with the entire query string stripped, and raw SDK keys never appear in
-messages. This is a deliberate forward-compatible bridge, not a violation of
-NFR23.
+NFR23 redaction (qs-08 Reconciliation Note): ``ConfigLoadError`` /
+``TrackingDeliveryError`` reduce endpoint URLs to ``host + path`` with the
+entire query string elided and any config/tracking-route SDK key masked. Story
+1.2 shipped this as a minimal INLINE shim; Story 4.1 (Task 3) REPOINTS those
+call sites onto the centralized :func:`convert_sdk._internal.redaction.redact_url`
+so there is exactly ONE redaction implementation in the codebase. This is a
+behavior-preserving (equal-or-stricter) swap of the masking mechanism only —
+the exception public contract is unchanged here (the full ``SafeContext``-based
+message enrichment is Story 4.2).
 """
 
 from __future__ import annotations
 
-import re
 from typing import Optional
-from urllib.parse import urlsplit
 
-# Matches the config/tracking routes' key segment so it can be masked in
-# diagnostics (the SDK key appears as the final path segment in both).
-_CONFIG_ROUTE_RE = re.compile(r"(/(?:config|track)/)([^/?#]+)")
-
-
-def _redact_key(key: str) -> str:
-    """Mask an SDK key to ``first4***last4`` (qs-08 shape).
-
-    Short keys (<= 8 chars) are fully masked to ``***`` so they cannot be
-    reconstructed from the redacted form.
-    """
-    if len(key) <= 8:
-        return "***"
-    return f"{key[:4]}***{key[-4:]}"
-
-
-def _redact_url(url: Optional[str]) -> Optional[str]:
-    """Reduce a URL to ``host/path`` with the query string stripped and any
-    config-route SDK key masked.
-
-    This is the Story 1.2 inline redaction shim (qs-08). Stripping the whole
-    query string — rather than only named secret parameters — eliminates the
-    risk of a new credential parameter leaking before an allowlist is updated.
-    The ``/config/{sdkKey}`` path segment is additionally masked so a full SDK
-    key never appears in an error message, even at DEBUG level.
-    """
-    if not url:
-        return url
-    parts = urlsplit(url)
-    host = parts.netloc or ""
-    path = parts.path or ""
-    if host or path:
-        endpoint = f"{host}{path}"
-    else:
-        # Not a recognizable absolute URL; redact the raw value (no query).
-        endpoint = url.split("?", 1)[0]
-    # Mask any /config/{sdkKey} key segment.
-    return _CONFIG_ROUTE_RE.sub(lambda m: f"{m.group(1)}{_redact_key(m.group(2))}", endpoint)
+# Single source of redaction logic (qs-08): errors.py (L0) is permitted to
+# import the L0 leaf ``_internal/`` utilities. Story 4.1 Task 3 replaces the
+# former inline ``_redact_key``/``_redact_url`` shim with this primitive.
+from convert_sdk._internal.redaction import redact_url as _redact_url
 
 
 class ConvertSDKError(Exception):
