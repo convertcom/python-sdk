@@ -14,6 +14,7 @@ later stories. The public API is sync-first for MVP.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
 from convert_sdk.config import SDKConfig
@@ -51,6 +52,15 @@ class Core:
         self._transport: Optional["Transport"] = transport
         self._owns_transport = False
         self._snapshot: Optional[ConfigSnapshot] = None
+        # Story 5.2 / ADR 0001: a single mutex guards every read and write of the
+        # live snapshot reference so the background refresh swap is atomic from an
+        # evaluating caller's perspective on EVERY CPython build (including
+        # free-threaded 3.13+) — never relying on GIL attribute-assignment
+        # atomicity. Held only for the constant-time rebind; no I/O inside it.
+        self._snapshot_lock = threading.Lock()
+        # Opt-in background refresh worker (None unless SDKConfig.refresh is set
+        # AND the SDK is in remote mode). Created at initialize().
+        self._refresher: Optional[Any] = None
         self._ready = False
         # Story 3.1: the composition root resolves and OWNS the single per-Core
         # DataStore. A configured store (SDKConfig.data_store) is honored as-is;
@@ -96,8 +106,14 @@ class Core:
 
     @property
     def current_config(self) -> Optional[ConfigSnapshot]:
-        """The current immutable config snapshot, or ``None`` if not ready."""
-        return self._snapshot
+        """The current immutable config snapshot, or ``None`` if not ready.
+
+        Read under the snapshot mutex (ADR 0001) so a concurrent background
+        refresh swap is observed atomically — the caller sees the whole previous
+        or the whole new snapshot, never a torn read.
+        """
+        with self._snapshot_lock:
+            return self._snapshot
 
     # --- visitor context ---------------------------------------------------
 
@@ -128,7 +144,13 @@ class Core:
         Raises:
             RuntimeError: if called before :meth:`initialize` (no snapshot).
         """
-        if self._snapshot is None:
+        # ADR 0001: capture the live snapshot reference under the mutex so a
+        # concurrent refresh swap can never produce a torn read. The Context is
+        # built from — and retains — this single captured reference for its whole
+        # lifetime (coherent per-request view even if a swap fires mid-request).
+        with self._snapshot_lock:
+            snapshot = self._snapshot
+        if snapshot is None:
             raise RuntimeError(
                 "Core must be initialized before creating a context "
                 "(call initialize() first)."
@@ -142,7 +164,7 @@ class Core:
         hydrated, segments = self._hydrate_visitor_state(visitor_id, visitor_attributes)
         return Context(
             visitor_id,
-            self._snapshot,
+            snapshot,
             visitor_attributes=hydrated,
             default_segments=segments,
             location_attributes=location_attributes,
@@ -267,7 +289,39 @@ class Core:
             target=self._config.logger,
             context=SafeContext(config_version=self._snapshot.project_id),
         )
+        # Story 5.2: opt-in background refresh. Only started for a remote
+        # (sdk_key) instance with a configured policy. refresh=None (default)
+        # keeps MVP behavior byte-for-byte (Critical Warning #1).
+        self._maybe_start_refresher()
         return self
+
+    def _maybe_start_refresher(self) -> None:
+        """Start the opt-in background config-refresh worker, if configured.
+
+        No-op unless ``SDKConfig.refresh`` is set. Direct-config mode has no
+        remote endpoint to poll, so a configured policy there spins up no worker
+        and instead emits a ``refresh.skipped`` diagnostic rather than silently
+        ignoring the misconfiguration (Critical Warning #7).
+        """
+        if self._config.refresh is None:
+            return
+        if self._config.is_direct_config:
+            log_safe(
+                LifecycleEvent.CONFIG_UPDATED,
+                level=logging.WARNING,
+                target=self._config.logger,
+                refresh_phase="skipped",
+                reason="direct_config_no_remote_endpoint",
+            )
+            return
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+
+        self._refresher = ConfigRefresher(
+            config=self._config,
+            transport=self._ensure_transport(),
+            on_snapshot=self._apply_refreshed_snapshot,
+        )
+        self._refresher.start()
 
     def _build_tracker(self) -> None:
         """Create the shared tracking orchestrator from the loaded snapshot.
@@ -314,16 +368,50 @@ class Core:
             self._owns_transport = True
         return self._transport
 
+    # --- automatic config refresh (Story 5.2) ------------------------------
+
+    def refresh_now(self) -> None:
+        """Trigger an immediate background config refresh, if refresh is enabled.
+
+        A safe no-op when automatic refresh was not opted into (``refresh=None``,
+        direct-config mode, or before :meth:`initialize`). The refresh runs on
+        the background worker thread and applies through the same atomic swap as
+        a scheduled refresh; this call returns immediately without blocking on
+        the fetch.
+        """
+        if self._refresher is not None:
+            self._refresher.trigger_now()
+
+    def _apply_refreshed_snapshot(self, snapshot: ConfigSnapshot) -> None:
+        """Atomically swap in a refreshed snapshot (ADR 0001).
+
+        The swap is a single mutex-guarded reference rebind so an in-flight
+        :meth:`create_context` / :attr:`current_config` read observes either the
+        whole previous or the whole new snapshot — never a partial state.
+        Snapshots are immutable and replaced wholesale; one is never mutated in
+        place (Critical Warning #2). Story 5.2 Task 3 extends this seam to
+        re-point tracking metadata and emit ``CONFIG_UPDATED``.
+        """
+        with self._snapshot_lock:
+            self._snapshot = snapshot
+
+    def _refresher_alive(self) -> bool:
+        """True while the background refresh worker thread is running (test seam)."""
+        return self._refresher is not None and self._refresher.is_alive()
+
     # --- lifecycle ---------------------------------------------------------
 
     def close(self) -> None:
         """Release resources. Closes the transport only if Core created it.
 
-        Cancels the opt-in periodic-flush timer (if any) so the daemonic thread
-        stops rescheduling. Does NOT perform a final flush — explicit flush and
-        the best-effort ``atexit`` hook are the documented shutdown-delivery
-        paths.
+        Stops the opt-in background refresh worker (Story 5.2) and cancels the
+        opt-in periodic-flush timer (if any) so the daemonic threads stop
+        rescheduling. Does NOT perform a final flush — explicit flush and the
+        best-effort ``atexit`` hook are the documented shutdown-delivery paths.
         """
+        if self._refresher is not None:
+            self._refresher.stop()
+            self._refresher = None
         if self._periodic_flusher is not None:
             self._periodic_flusher.cancel()
             self._periodic_flusher = None
