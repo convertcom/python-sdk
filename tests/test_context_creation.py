@@ -402,3 +402,65 @@ def test_context_does_not_import_concrete_store():
     source = inspect.getsource(context_mod)
     assert "adapters.storage.in_memory" not in source
     assert "InMemoryDataStore" not in source
+
+
+# --- Story 3.2 AC #4: determinism under mutable state -----------------------
+
+
+def test_repeated_evaluation_unchanged_state_is_deterministic():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    first = ctx.run_experience("us-experience")
+    # No set_attributes, no overlay, same snapshot → identical outcome (FR25).
+    second = ctx.run_experience("us-experience")
+    assert first is not None and second is not None
+    assert first.variation_id == second.variation_id
+    assert first.experience_key == second.experience_key
+
+
+def test_noop_set_attributes_does_not_perturb_determinism():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    before = ctx.run_experience("us-experience")
+    # A no-op update to the SAME values must not change the bucketed variation.
+    ctx.set_attributes({"country": "US"})
+    after = ctx.run_experience("us-experience")
+    assert before is not None and after is not None
+    assert before.variation_id == after.variation_id
+
+
+def test_qualification_neutral_update_keeps_variation_stable():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    before = ctx.run_experience("us-experience")
+    # Adding an unrelated attribute does not flip US audience qualification, so
+    # the qualified visitor's bucketed variation is unchanged (bucketing keyed on
+    # identity + snapshot, never attributes).
+    ctx.set_attributes({"tier": "gold"})
+    after = ctx.run_experience("us-experience")
+    assert before is not None and after is not None
+    assert before.variation_id == after.variation_id
+
+
+# --- Story 3.2 AC #5: persistent update vs ephemeral overlay ----------------
+
+
+def test_overlay_takes_precedence_for_call_but_is_not_persisted():
+    store = _RecordingStore()
+    core = Core(SDKConfig(data=CONFIG, data_store=store)).initialize()
+    ctx = core.create_context("v_a", visitor_attributes={"country": "CA"})
+    # Persist an update that does NOT qualify.
+    ctx.set_attributes({"country": "DE"})
+    assert ctx.run_experience("us-experience") is None
+
+    # A request-time overlay qualifies for THIS call only and takes precedence
+    # over the persisted state.
+    assert ctx.run_experience("us-experience", attributes={"country": "US"}) is not None
+
+    # The overlay is NOT written back: persisted state remains "DE" and a later
+    # call without the overlay reverts to the non-qualifying persisted state.
+    assert dict(ctx.visitor_attributes) == {"country": "DE"}
+    assert ctx.run_experience("us-experience") is None
+    # And the store still holds only the persisted "DE", never the overlay "US".
+    state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    assert dict(store.get(state_keys[0])) == {"country": "DE"}
