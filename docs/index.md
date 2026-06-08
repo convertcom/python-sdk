@@ -30,6 +30,17 @@ All code samples in these guides are executed against the current public API by
 | [Migrating from raw REST](migration-from-rest.md) | Teams calling the Convert config and tracking endpoints directly today. |
 | [Migrating from the JavaScript SDK](migration-from-javascript.md) | Teams who know the JS FullStack SDK and want the Pythonic mental model. |
 
+## Looking ahead
+
+The SDK ships sync-first today. These documents record where it is headed so you
+can plan around the trajectory — what is shipped, what is in flight, and what is
+deliberately deferred.
+
+| Document | What it covers |
+|----------|----------------|
+| [Roadmap](roadmap.md) | The phase roadmap: Phase 1 (MVP, shipped), Phase 2 (long-running service support — auto-refresh shipped), Phase 3 (async + framework integrations + observability, planned and gated). |
+| [Async & framework design intent](async.md) | The planned Phase 3 async public API and framework-integration helpers, the sync–async coexistence model, and a forward-compatibility audit confirming no MVP module needs a rewrite to enable async. |
+
 ## The public API at a glance
 
 Everything the guides reference is importable from `convert_sdk`:

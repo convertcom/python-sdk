@@ -100,9 +100,21 @@ These are the behaviors you no longer have to build and maintain yourself:
   construction: the visitor reference is hashed and only allowlist-safe fields
   are exposed. See [Debugging](debugging.md). Raw REST logging is on you.
 
+## Future async / framework support
+
+If your service is async (FastAPI, an `asyncio` worker), you can adopt the SDK
+**today**: it is sync-first, so call its methods from a coroutine via
+`asyncio.to_thread()` (evaluation is non-blocking compute; config refresh runs
+on its own daemon thread). A **native** async surface and framework-specific
+helpers are **planned for Phase 3** and not yet implemented — see the
+[roadmap](roadmap.md) and the [async & framework design intent](async.md). The
+core SDK will always stay framework-free; framework helpers ship as separate
+distributions.
+
 ## Where to go next
 
 - [Initialization](initialization.md) — `sdk_key` vs `data`, the lifecycle
 - [Evaluation](evaluation.md) — replacing your own bucketing/feature logic
 - [Tracking](tracking.md) and [Queue control](queue-control.md) — the delivery model
 - [Debugging](debugging.md) — typed diagnostics in place of log spelunking
+- [Roadmap](roadmap.md) and [async & framework design intent](async.md) — the planned trajectory
