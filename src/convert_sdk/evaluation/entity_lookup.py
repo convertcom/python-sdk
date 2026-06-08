@@ -84,12 +84,15 @@ _ENTITY_ACCESSORS: Mapping[
 SUPPORTED_ENTITY_TYPES: tuple[str, ...] = tuple(_ENTITY_ACCESSORS.keys())
 
 
-def _no_result() -> None:
+def _no_result() -> Optional[Mapping[str, Any]]:
     """The Story-3.4 single-entity no-result decision point.
 
     Centralized so Story 4.2 can replace the ``None`` here with the FR50
     typed-reason result object in ONE place, without touching any hit return or
-    breaking Story 3.4 callers. Do NOT inline ``None`` at the call sites.
+    breaking Story 3.4 callers. Do NOT inline ``None`` at the call sites. The
+    return type matches :func:`_resolve` so callers can ``return _no_result()``
+    under mypy strict (the value is ``None`` today; the typed annotation reserves
+    the Story-4.2 swap point).
     """
     return None
 
@@ -108,7 +111,7 @@ def _resolve(
     accessors = _ENTITY_ACCESSORS.get(entity_type)
     if accessors is None:
         return _no_result()
-    entity = accessors[field](snapshot, str(identity))
+    entity: Optional[Mapping[str, Any]] = accessors[field](snapshot, str(identity))
     if entity is None:
         return _no_result()
     return entity

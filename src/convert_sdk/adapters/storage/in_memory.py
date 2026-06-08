@@ -33,7 +33,7 @@ Layering: this is an **L3** adapter. The ONLY module allowed to import it is the
 composition root ``core.py`` (L4). No L0/L1/L2 module
 (``domain/``/``ports/``/``evaluation/``/``tracking/``/``context.py``) may import
 it — they depend on the :class:`~convert_sdk.ports.storage.DataStore` protocol
-only (import-linter–enforced; see ``tests/test_layering.py``).
+only (import-linter-enforced; see ``tests/test_layering.py``).
 
 Dependencies: stdlib only (``threading``, ``time``, ``typing``). No SQLite,
 Redis, ``diskcache``, or any third-party storage library — durable adapters are

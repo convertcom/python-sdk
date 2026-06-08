@@ -128,7 +128,9 @@ class ConfigSnapshot:
         boundary payloads before calling this. Collections are stored as tuples
         so the snapshot owns immutable copies and never aliases caller data.
         """
-        def _freeze(items: Sequence[Mapping[str, Any]]) -> tuple:
+        def _freeze(
+            items: Sequence[Mapping[str, Any]],
+        ) -> tuple[Mapping[str, Any], ...]:
             return tuple(MappingProxyType(dict(item)) for item in items)
 
         return cls(

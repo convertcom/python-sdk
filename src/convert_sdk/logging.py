@@ -164,4 +164,8 @@ def log_event_handler_error(*, event: str) -> None:
     in-process EventBus to isolate a buggy integrator handler (Critical Warning
     #6 — parity with the JS ``EventManager.fire`` per-listener try/catch).
     """
-    logger.error("lifecycle event handler raised and was swallowed (event=%s)", event, exc_info=True)
+    logger.error(
+        "lifecycle event handler raised and was swallowed (event=%s)",
+        event,
+        exc_info=True,
+    )

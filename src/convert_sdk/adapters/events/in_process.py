@@ -76,7 +76,7 @@ class InProcessEventBus:
         for handler in tuple(handlers):
             try:
                 handler(payload, error)
-            except Exception:  # noqa: BLE001 - intentional handler isolation
+            except Exception:
                 # Parity with JS EventManager.fire per-listener try/catch:
                 # isolate, log privacy-safely, swallow. One bad handler must not
                 # break delivery or the other handlers.

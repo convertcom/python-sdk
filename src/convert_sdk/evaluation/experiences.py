@@ -21,7 +21,7 @@ either.
 from __future__ import annotations
 
 import math
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 from convert_sdk.domain.results import ExperienceResult
 from convert_sdk.evaluation.bucketing import (
@@ -138,7 +138,8 @@ def select_experience(
 def _find_variation(
     experience: Mapping[str, Any], variation_id: str
 ) -> Optional[Mapping[str, Any]]:
-    for variation in experience.get("variations", []) or []:
+    variations: Sequence[Mapping[str, Any]] = experience.get("variations", []) or []
+    for variation in variations:
         if str(variation.get("id")) == str(variation_id):
             return variation
     return None

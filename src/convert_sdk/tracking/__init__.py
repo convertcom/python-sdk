@@ -27,7 +27,7 @@ from convert_sdk.tracking.payloads import TRACKING_SOURCE, build_tracking_payloa
 from convert_sdk.tracking.queue import ReleaseReason, TrackingQueue
 from convert_sdk.tracking.tracker import Tracker
 
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped by story for readability, not alphabetized
     "create_conversion",
     "build_tracking_payload",
     "TRACKING_SOURCE",

@@ -90,10 +90,7 @@ def select_custom_segments(
         # segment is added when its rule matches the rule input OR when no rule
         # is present"). A segment WITH rules matches only when the rule input
         # satisfies them via the Story 1.4 engine.
-        if not rules:
-            this_matched = True
-        else:
-            this_matched = is_rule_matched(segment_rule, rules)
+        this_matched = True if not rules else is_rule_matched(segment_rule, rules)
 
         if not this_matched:
             continue

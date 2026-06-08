@@ -37,7 +37,7 @@ _C1 = 0xCC9E2D51
 _C2 = 0x1B873593
 
 
-def _utf16_code_units(value: str) -> list:
+def _utf16_code_units(value: str) -> list[int]:
     """Return the UTF-16 code units of ``value`` as a list of ints.
 
     JavaScript strings are sequences of UTF-16 code units, and the npm
@@ -45,7 +45,7 @@ def _utf16_code_units(value: str) -> list:
     ``str`` indexing yields Unicode code points, so characters outside the BMP
     must be split into surrogate pairs to match JS ``charCodeAt`` semantics.
     """
-    units: list = []
+    units: list[int] = []
     for char in value:
         code_point = ord(char)
         if code_point > 0xFFFF:

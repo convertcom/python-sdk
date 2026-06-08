@@ -45,7 +45,7 @@ from convert_sdk.events import LifecycleEvent
 from convert_sdk.ports.storage import DataStore
 from convert_sdk.version import __version__
 
-__all__ = [
+__all__ = [  # noqa: RUF022 - grouped by story for readability, not alphabetized
     # Frozen Story 1.1 boundary.
     "Core",
     "Context",

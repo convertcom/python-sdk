@@ -37,7 +37,12 @@ from convert_sdk.errors import ConfigLoadError, TrackingDeliveryError
 class HttpxTransport:
     """Long-lived httpx-backed implementation of the transport port."""
 
-    def __init__(self, transport_config: TransportConfig, *, client: Optional[httpx.Client] = None) -> None:
+    def __init__(
+        self,
+        transport_config: TransportConfig,
+        *,
+        client: Optional[httpx.Client] = None,
+    ) -> None:
         self._config = transport_config
         headers: Dict[str, str] = dict(transport_config.headers)
         if transport_config.auth_secret:
@@ -144,6 +149,5 @@ class HttpxTransport:
     def __enter__(self) -> "HttpxTransport":
         return self
 
-    def __exit__(self, *exc: Any) -> bool:
+    def __exit__(self, *exc: Any) -> None:
         self.close()
-        return False

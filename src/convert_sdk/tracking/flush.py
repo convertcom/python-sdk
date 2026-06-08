@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import atexit
 import threading
-from typing import Any, Callable, Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 
 class Flushable(Protocol):
@@ -97,7 +97,10 @@ def register_atexit_flush(flushable: Flushable) -> Callable[[], None]:
     """
 
     def _final_flush() -> None:
-        try:
+        # contextlib.suppress would drop the `# pragma: no cover` that keeps this
+        # unreachable-at-test-time shutdown path out of the coverage floor, so the
+        # explicit try/except is retained deliberately (SIM105 waived here only).
+        try:  # noqa: SIM105
             flushable.flush()
         except Exception:  # pragma: no cover - shutdown best-effort
             # Never let a shutdown-time delivery failure crash the interpreter.

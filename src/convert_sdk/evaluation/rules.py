@@ -55,7 +55,7 @@ def _equals(value: Any, test_against: Any) -> bool:
     if isinstance(value, (list, tuple)):
         return test_against in value
     if isinstance(value, Mapping):
-        return str(test_against) in {str(k) for k in value.keys()}
+        return str(test_against) in {str(k) for k in value}
     return str(value).lower() == str(test_against).lower()
 
 
@@ -123,7 +123,7 @@ def _process_rule_item(data: Optional[Mapping[str, Any]], rule: Mapping[str, Any
     matching = rule.get("matching") or {}
     match_type = matching.get("match_type")
     negated = bool(matching.get("negated", False))
-    comparator = _COMPARATORS.get(match_type)
+    comparator = _COMPARATORS.get(match_type) if match_type is not None else None
     if comparator is None:
         return False
 
@@ -152,10 +152,7 @@ def _process_or_when(data: Optional[Mapping[str, Any]], rules_subset: Mapping[st
     items: Sequence[Mapping[str, Any]] = rules_subset.get("OR_WHEN") or []
     if not items:
         return False
-    for item in items:
-        if _process_rule_item(data, item) is True:
-            return True
-    return False
+    return any(_process_rule_item(data, item) is True for item in items)
 
 
 def _process_and(data: Optional[Mapping[str, Any]], rules_subset: Mapping[str, Any]) -> bool:
@@ -163,10 +160,7 @@ def _process_and(data: Optional[Mapping[str, Any]], rules_subset: Mapping[str, A
     blocks: Sequence[Mapping[str, Any]] = rules_subset.get("AND") or []
     if not blocks:
         return False
-    for block in blocks:
-        if _process_or_when(data, block) is not True:
-            return False
-    return True
+    return all(_process_or_when(data, block) is True for block in blocks)
 
 
 def is_rule_matched(
@@ -184,10 +178,7 @@ def is_rule_matched(
     or_branches: Sequence[Mapping[str, Any]] = rule.get("OR") or []
     if not or_branches:
         return False
-    for branch in or_branches:
-        if _process_and(data, branch) is True:
-            return True
-    return False
+    return any(_process_and(data, branch) is True for branch in or_branches)
 
 
 # ---------------------------------------------------------------------------
@@ -237,14 +228,15 @@ def qualifies(
 
     # Location qualification (site_area rule set).
     site_area = experience.get("site_area")
-    if site_area:
-        if not is_rule_matched(location_attributes, site_area):
-            return False
+    if site_area and not is_rule_matched(location_attributes, site_area):
+        return False
 
-    # Audience qualification.
+    # Audience qualification. Kept as an explicit guard clause (parallel to the
+    # site_area guard above) rather than a compound negated return for clarity.
     audience_ids = experience.get("audiences") or []
-    if audience_ids:
-        if not _matches_any_audience(audience_ids, snapshot, visitor_attributes):
-            return False
+    if audience_ids and not _matches_any_audience(  # noqa: SIM103
+        audience_ids, snapshot, visitor_attributes
+    ):
+        return False
 
     return True
