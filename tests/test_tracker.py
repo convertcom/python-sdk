@@ -14,6 +14,7 @@ coverage lives in ``tests/integration/`` per qs-06).
 
 from typing import Any, Dict, List
 
+from convert_sdk import InMemoryDataStore
 from convert_sdk.config import SDKConfig
 from convert_sdk.config_loader import load_snapshot
 from convert_sdk.domain.results import ConversionStatus
@@ -55,10 +56,18 @@ class FakeTransport:
         pass
 
 
-def _tracker(transport=None, batch_size=10):
+def _tracker(transport=None, batch_size=10, data_store=None):
+    # Story 3.1: Core resolves and injects the per-Core DataStore; in this unit
+    # fixture we inject one directly (the tracker no longer constructs the
+    # concrete store itself — that is the composition root's job).
     snap = load_snapshot(CONFIG)
     cfg = SDKConfig(sdk_key="my-sdk-key", batch_size=batch_size)
-    return Tracker(snapshot=snap, config=cfg, transport=transport)
+    return Tracker(
+        snapshot=snap,
+        config=cfg,
+        transport=transport,
+        data_store=data_store if data_store is not None else InMemoryDataStore(),
+    )
 
 
 def test_flush_empty_queue_is_noop():
