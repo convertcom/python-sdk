@@ -204,17 +204,27 @@ def test_run_custom_segments_persists_through_store_and_rehydrates():
     assert list(ctx2.default_segments.get("customSegments", [])) == ["s_us"]
 
 
-def test_run_custom_segments_performs_no_network_io(monkeypatch):
-    # Custom-segment evaluation must be fully local — no transport construction.
-    import convert_sdk.evaluation.segments as seg_mod
-
-    # The module must not import any transport/network surface at all.
+def test_run_custom_segments_performs_no_network_io():
+    # Custom-segment evaluation must be fully local — no transport/adapter
+    # IMPORTS at all (network-free, FR15). Inspect actual import statements via
+    # the AST so descriptive docstring words don't trip the assertion.
+    import ast
     import inspect
 
-    source = inspect.getsource(seg_mod)
-    assert "httpx" not in source
-    assert "transport" not in source.lower()
-    assert "adapters" not in source
+    import convert_sdk.evaluation.segments as seg_mod
+
+    tree = ast.parse(inspect.getsource(seg_mod))
+    imported_modules: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            imported_modules.append(node.module or "")
+        elif isinstance(node, ast.Import):
+            imported_modules.extend(alias.name for alias in node.names)
+    joined = " ".join(imported_modules)
+    assert "httpx" not in joined
+    assert "transport" not in joined
+    assert "adapters" not in joined
+    assert "tracking" not in joined
 
     core = _ready_core()
     ctx = core.create_context("v_a")

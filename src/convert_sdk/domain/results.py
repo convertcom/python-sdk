@@ -15,7 +15,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -211,3 +211,28 @@ class ConversionResult:
         if self.status is ConversionStatus.QUEUED:
             return None
         return self.status.value
+
+
+@dataclass(frozen=True)
+class CustomSegmentsResult:
+    """The typed outcome of :meth:`convert_sdk.context.Context.run_custom_segments`.
+
+    Story 3.3 / FR15. Custom-segment evaluation returns a TYPED non-exception
+    result (never a raw dict, never raising on a normal no-match) — the Python
+    analogue of the JS ``SegmentsManager.selectCustomSegments`` returning a
+    ``VisitorSegments`` object rather than ``null`` on a non-error outcome.
+
+    Attributes:
+        matched_segment_ids: The segment IDs newly matched and recorded into the
+            visitor's distinct default-segment state by THIS call (in
+            resolution order). An empty tuple is a normal no-match — a typed,
+            non-exception outcome, distinguishable from a match purely by
+            inspecting this field.
+    """
+
+    matched_segment_ids: Tuple[str, ...] = ()
+
+    @property
+    def matched(self) -> bool:
+        """Whether this call matched and recorded at least one custom segment."""
+        return bool(self.matched_segment_ids)

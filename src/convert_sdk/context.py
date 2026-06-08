@@ -27,11 +27,22 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
 from convert_sdk.domain.context_state import ContextState
-from convert_sdk.domain.results import ConversionResult, ExperienceResult, FeatureResult
+from convert_sdk.domain.results import (
+    ConversionResult,
+    CustomSegmentsResult,
+    ExperienceResult,
+    FeatureResult,
+)
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
+from convert_sdk.evaluation.segments import select_custom_segments
 from convert_sdk.ports.storage import visitor_state_key
 from convert_sdk.tracking.conversions import create_conversion
+
+# The distinct key under which matched custom-segment IDs are recorded inside
+# the default-segment state (JS ``SegmentsKeys.CUSTOM_SEGMENTS`` parity). Kept in
+# sync with the ``customSegments`` allowlist key in ``tracking/payloads.py``.
+_CUSTOM_SEGMENTS_KEY = "customSegments"
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
@@ -192,6 +203,62 @@ class Context:
         """
         self._state = self._state.with_segments(segments)
         self._persist_visitor_state()
+
+    def run_custom_segments(
+        self,
+        segment_keys: list[str],
+        rule_data: Optional[Mapping[str, Any]] = None,
+    ) -> CustomSegmentsResult:
+        """Evaluate custom segment matches for this visitor (FR15).
+
+        Resolves the named segments from the immutable
+        :class:`~convert_sdk.domain.config_snapshot.ConfigSnapshot` and matches
+        each segment's rule against the visitor's segment-rule input through the
+        SAME pure-Python rule engine
+        (:func:`convert_sdk.evaluation.rules.is_rule_matched`) the SDK uses for
+        audience qualification — delegating to
+        :func:`convert_sdk.evaluation.segments.select_custom_segments`.
+        Evaluation is fully LOCAL and deterministic: it reads only the loaded
+        snapshot plus visitor-scoped state and performs NO network I/O (Critical
+        Warning #5).
+
+        The per-call ``rule_data`` is an EPHEMERAL request-time overlay on the
+        visitor's stored attributes (request value > persisted state precedence,
+        reusing the Story 3.2 :meth:`ContextState.with_overlay` seam). It is
+        NEVER written back into :attr:`visitor_attributes` (AC #5); only the
+        resulting matched segment IDs are recorded — under a ``customSegments``
+        list inside the DISTINCT default-segment state (JS ``VisitorSegments``
+        parity) — and persisted through the injected ``DataStore`` so a later
+        ``create_context(visitor_id)`` rehydrates them. Already-recorded segment
+        IDs are not re-added (duplicates skipped).
+
+        Args:
+            segment_keys: The segment keys to evaluate.
+            rule_data: Optional per-call segment-rule input. Overlays the stored
+                visitor attributes for THIS call only.
+
+        Returns:
+            A typed :class:`~convert_sdk.domain.results.CustomSegmentsResult`
+            carrying the newly matched segment IDs. A normal no-match returns a
+            result with an empty ``matched_segment_ids`` — a typed, non-exception
+            outcome (never a raw dict, never raises on a normal miss).
+        """
+        # Ephemeral request-time overlay (request > persisted), reusing the
+        # Story 3.2 seam — never written back into visitor_attributes.
+        segment_rule = self._state.with_overlay(rule_data)
+
+        existing = self._state.default_segments.get(_CUSTOM_SEGMENTS_KEY) or []
+        matched = select_custom_segments(
+            self._snapshot,
+            segment_keys,
+            segment_rule,
+            existing_ids=existing,
+        )
+        if matched:
+            updated = list(existing) + matched
+            self._state = self._state.with_segments({_CUSTOM_SEGMENTS_KEY: updated})
+            self._persist_visitor_state()
+        return CustomSegmentsResult(matched_segment_ids=tuple(matched))
 
     def _persist_visitor_state(self) -> None:
         """Persist the current visitor state through the injected ``DataStore``.
