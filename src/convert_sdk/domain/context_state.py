@@ -63,9 +63,43 @@ class ContextState:
         Returns a fresh mapping; the stored baseline (and ``overlay``) are never
         mutated. When ``overlay`` is empty/``None`` the read-only baseline view
         is returned unchanged.
+
+        This is the EPHEMERAL request-time seam (Story 1.3 / FR12). It is kept
+        deliberately distinct from :meth:`with_attributes`, which produces a
+        PERSISTENT update to the stored baseline (Story 3.2).
         """
         if not overlay:
             return self.visitor_attributes
         merged = dict(self.visitor_attributes)
         merged.update(overlay)
         return merged
+
+    def with_attributes(self, new_attributes: Optional[Mapping[str, Any]]) -> "ContextState":
+        """Return a NEW :class:`ContextState` with ``new_attributes`` merged in.
+
+        This is the immutable, PERSISTENT visitor-attribute update operation
+        (Story 3.2 / FR11). It performs a key-merge of the stored visitor
+        attributes with ``new_attributes`` — new keys override touched keys,
+        untouched keys persist — mirroring the JS
+        ``objectDeepMerge(this._visitorProperties, attributes)`` behavior in
+        ``Context.getVisitorProperties``.
+
+        The original instance is never mutated: a fresh frozen ``ContextState``
+        is returned, carrying the same ``visitor_id`` and the same
+        :class:`ConfigSnapshot` by reference (the snapshot is shared, never
+        copied or mutated per visitor — Critical Warnings #1/#2). When
+        ``new_attributes`` is empty/``None`` the merge is a content-equal no-op
+        copy, preserving determinism (AC #4).
+
+        Distinct from :meth:`with_overlay`: this update is meant to be persisted
+        (the caller writes it through the ``DataStore``), whereas ``with_overlay``
+        is a per-call ephemeral merge that is never written back.
+        """
+        merged = dict(self.visitor_attributes)
+        if new_attributes:
+            merged.update(new_attributes)
+        return ContextState(
+            visitor_id=self.visitor_id,
+            snapshot=self.snapshot,
+            visitor_attributes=merged,
+        )
