@@ -33,6 +33,7 @@ from convert_sdk.domain.results import (
     ExperienceResult,
     FeatureResult,
 )
+from convert_sdk.evaluation import entity_lookup
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
 from convert_sdk.evaluation.segments import select_custom_segments
@@ -488,3 +489,83 @@ class Context:
             visitor_attributes=self._state.visitor_attributes,
             default_segments=self._state.default_segments,
         )
+
+    # --- entity lookup (Story 3.4 / FR28) ----------------------------------
+
+    def get_config_entity(
+        self, entity_type: str, key: str
+    ) -> Optional[Mapping[str, Any]]:
+        """Look up a configuration entity by key for advanced/debugging use (FR28).
+
+        Resolves the typed config entity of ``entity_type`` whose ``key`` matches,
+        from the immutable :class:`~convert_sdk.domain.config_snapshot.ConfigSnapshot`
+        this context already holds, via the snapshot's precomputed by-key index
+        (delegating to :func:`convert_sdk.evaluation.entity_lookup.resolve_entity`).
+        This is a READ-ONLY advanced-integration/debugging helper: it performs NO
+        network I/O and never mutates the snapshot.
+
+        Args:
+            entity_type: A supported entity-type identifier — one of
+                ``"experiences"``, ``"features"``, ``"goals"``, ``"audiences"``,
+                ``"segments"`` (see
+                :data:`convert_sdk.evaluation.entity_lookup.SUPPORTED_ENTITY_TYPES`).
+            key: The entity ``key`` to resolve.
+
+        Returns:
+            The matching typed domain entity, or ``None`` on a normal miss
+            (unknown key, a known key under the wrong ``entity_type``, or an
+            unknown/unsupported ``entity_type``). Never raises on a normal miss
+            and never returns a sentinel string.
+
+        Note:
+            Story 4.2 will enrich the ``None`` miss into the FR50 typed-reason
+            result object (naming *why* the lookup did not resolve) WITHOUT
+            changing this hit return shape.
+        """
+        return entity_lookup.resolve_entity(self._snapshot, entity_type, key)
+
+    def get_config_entities(
+        self, entity_type: str, keys: list[str]
+    ) -> list[Mapping[str, Any]]:
+        """Look up multiple configuration entities by key (FR28).
+
+        Resolves each key in ``keys`` of ``entity_type`` over the snapshot's
+        by-key index (delegating to
+        :func:`convert_sdk.evaluation.entity_lookup.resolve_entities`) and returns
+        the matched entities in the supplied order, SKIPPING keys that do not
+        resolve (no ``None`` placeholders). Read-only; no network I/O.
+
+        Args:
+            entity_type: A supported entity-type identifier (see
+                :meth:`get_config_entity`).
+            keys: The entity keys to resolve.
+
+        Returns:
+            The list of matched typed domain entities; an empty list when none
+            resolve (including an unknown/unsupported ``entity_type``). Never
+            raises on a normal miss.
+        """
+        return entity_lookup.resolve_entities(self._snapshot, entity_type, keys)
+
+    def get_config_entity_by_id(
+        self, entity_type: str, entity_id: str
+    ) -> Optional[Mapping[str, Any]]:
+        """Look up a configuration entity by id for advanced/debugging use (FR28).
+
+        Resolves the typed config entity of ``entity_type`` whose ``id`` matches,
+        over the snapshot's precomputed by-id index (delegating to
+        :func:`convert_sdk.evaluation.entity_lookup.resolve_entity_by_id`).
+        Read-only; no network I/O; never mutates the snapshot.
+
+        Args:
+            entity_type: A supported entity-type identifier (see
+                :meth:`get_config_entity`).
+            entity_id: The entity ``id`` to resolve.
+
+        Returns:
+            The matching typed domain entity, or ``None`` on a normal miss
+            (unknown id, wrong/unsupported ``entity_type``). Never raises on a
+            normal miss. (Story 4.2 enriches the ``None`` miss per
+            :meth:`get_config_entity`.)
+        """
+        return entity_lookup.resolve_entity_by_id(self._snapshot, entity_type, entity_id)
