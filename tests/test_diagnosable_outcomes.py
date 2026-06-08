@@ -126,3 +126,95 @@ def test_new_diagnostic_types_exported_additively():
     # Internal modules must not leak.
     for internal in ("results", "errors", "logging", "_internal", "diagnostics"):
         assert internal not in declared
+
+
+# --- PY-2: typed exception SafeContext carriers (FR49 / NFR23) ----------------
+
+RAW_CONFIG_URL = (
+    "https://cdn.example.com/config/sdk_key_abcdef1234567890"
+    "?environment=prod&token=supersecret"
+)
+
+
+def test_base_error_carries_code_and_read_only_context():
+    """ConvertSDKError exposes ``code`` + a read-only ``context`` mapping."""
+    from convert_sdk._internal.redaction import SafeContext
+    from convert_sdk.errors import ConvertSDKError
+
+    err = ConvertSDKError("boom", code="generic_failure", context=SafeContext(status_code=500))
+    assert err.code == "generic_failure"
+    assert isinstance(err.context, MappingProxyType)
+    assert err.context["status_code"] == 500
+    with pytest.raises(TypeError):
+        err.context["status_code"] = 0  # type: ignore[index]
+
+
+def test_base_error_context_defaults_are_safe():
+    """A plain error has an empty (never ``None``) context and no code by default."""
+    from convert_sdk.errors import ConvertSDKError
+
+    err = ConvertSDKError("boom")
+    assert err.code is None
+    assert isinstance(err.context, MappingProxyType)
+    assert dict(err.context) == {}
+
+
+def test_config_load_error_includes_status_and_redacted_url_no_query():
+    """ConfigLoadError carries status + redacted endpoint; message has no query."""
+    from convert_sdk.errors import ConfigLoadError
+
+    err = ConfigLoadError("config fetch failed", endpoint=RAW_CONFIG_URL, status_code=503)
+    text = str(err)
+    # No raw secrets anywhere in the rendered message.
+    assert "supersecret" not in text
+    assert "environment=prod" not in text
+    assert "?" not in text
+    assert "sdk_key_abcdef1234567890" not in text
+    # Diagnosable safe context present.
+    assert "503" in text
+    assert "cdn.example.com" in text
+    # Backwards-compatible attributes preserved.
+    assert err.status_code == 503
+    # Story 4.2 enrichment: a SafeContext-derived read-only context carrier.
+    assert err.context["status_code"] == 503
+    assert "supersecret" not in str(err.context)
+
+
+def test_config_load_error_repr_is_secret_free():
+    """``repr`` must be as safe as ``str`` (no SDK key / query / token)."""
+    from convert_sdk.errors import ConfigLoadError
+
+    err = ConfigLoadError("config fetch failed", endpoint=RAW_CONFIG_URL, status_code=503)
+    r = repr(err)
+    for leak in ("supersecret", "environment=prod", "sdk_key_abcdef1234567890", "?token"):
+        assert leak not in r
+
+
+def test_tracking_delivery_error_includes_batch_and_retry_no_secrets():
+    """TrackingDeliveryError carries batch_size + retry_count, never the SDK key."""
+    from convert_sdk.errors import TrackingDeliveryError
+
+    err = TrackingDeliveryError(
+        "delivery failed",
+        endpoint="https://track.example.com/track/sdk_key_abcdef1234567890",
+        status_code=502,
+        batch_size=15,
+        retry_count=2,
+    )
+    text = str(err)
+    assert "15" in text  # batch_size
+    assert "502" in text  # status
+    assert "sdk_key_abcdef1234567890" not in text
+    assert err.context["batch_size"] == 15
+    assert err.context["retry_count"] == 2
+    assert err.status_code == 502
+
+
+def test_conversion_data_error_never_embeds_raw_value():
+    """ConversionDataError carries only the offending key + safe reason (no value)."""
+    from convert_sdk.errors import ConversionDataError
+
+    err = ConversionDataError("payload", reason="not a JSON primitive")
+    text = str(err)
+    assert "payload" in text
+    assert "not a JSON primitive" in text
