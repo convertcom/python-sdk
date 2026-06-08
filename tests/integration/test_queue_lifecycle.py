@@ -25,6 +25,8 @@ import textwrap
 import time
 from pathlib import Path
 
+import pytest
+
 
 from .conftest import SDK_KEY
 
@@ -169,6 +171,16 @@ def test_no_flush_scenario_drops_events_without_crash(tmp_path):
     assert delivered == []
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "POSIX-only: Windows has no SIGTERM delivery to a Python handler — "
+        "os.kill(pid, SIGTERM) maps to TerminateProcess and kills the process "
+        "unconditionally, so the graceful-flush handler never runs. The "
+        "Windows graceful-shutdown path is the atexit hook, covered by "
+        "test_atexit_scenario_attempts_final_delivery."
+    ),
+)
 def test_sigterm_scenario_flushes_before_exit(tmp_path):
     delivered = _run_scenario(tmp_path, "sigterm")
     # The process-installed SIGTERM handler flushed before exit.
