@@ -67,6 +67,72 @@ class TransportConfig:
 
 
 @dataclass(frozen=True)
+class RefreshConfig:
+    """Opt-in policy for post-MVP automatic config refresh (Story 5.2, FR31).
+
+    Supplying a ``RefreshConfig`` on :attr:`SDKConfig.refresh` opts a remote
+    (``sdk_key``) SDK instance into a background daemon thread that periodically
+    re-fetches and atomically swaps the config snapshot. The default
+    (``SDKConfig.refresh=None``) is byte-for-byte MVP behavior: no daemon thread,
+    no diagnostic events, and zero added cost.
+
+    Every concrete numeric default below is ratified in
+    ``docs/adr/0001-config-refresh-concurrency-and-backoff.md`` (audit F-028 —
+    architecture defers backoff parameters to a Phase-2 ADR).
+
+    Args:
+        interval_seconds: Base period between successful refresh attempts.
+            Default ``300.0`` (5 minutes) — mirrors the JS SDK's default
+            ``dataRefreshInterval`` of 300_000 ms, expressed in seconds. Must be
+            ``> 0``.
+        jitter_seconds: Maximum uniform random jitter added to each scheduled
+            wait so a fleet of processes does not synchronize ("thundering
+            herd"). Default ``30.0``. Must satisfy ``0 <= jitter <= interval``.
+        backoff_factor: Multiplier applied to the wait after each consecutive
+            transient failure (exponential backoff). Default ``2.0``. Must be
+            ``>= 1.0``.
+        backoff_max_seconds: Ceiling on the backed-off wait so a persistently
+            failing endpoint is retried at a bounded cadence rather than a tight
+            loop (AC-3). Default ``600.0`` (10 minutes). Must be ``>= interval``.
+    """
+
+    interval_seconds: float = 300.0
+    jitter_seconds: float = 30.0
+    backoff_factor: float = 2.0
+    backoff_max_seconds: float = 600.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.interval_seconds, (int, float)) or self.interval_seconds <= 0:
+            raise InvalidConfigError(
+                "RefreshConfig 'interval_seconds' must be a positive number; "
+                f"got {self.interval_seconds!r}"
+            )
+        if (
+            not isinstance(self.jitter_seconds, (int, float))
+            or self.jitter_seconds < 0
+            or self.jitter_seconds > self.interval_seconds
+        ):
+            raise InvalidConfigError(
+                "RefreshConfig 'jitter_seconds' must be a number in "
+                f"[0, interval_seconds]; got {self.jitter_seconds!r}"
+            )
+        if not isinstance(self.backoff_factor, (int, float)) or self.backoff_factor < 1.0:
+            raise InvalidConfigError(
+                "RefreshConfig 'backoff_factor' must be a number >= 1.0; "
+                f"got {self.backoff_factor!r}"
+            )
+        if (
+            not isinstance(self.backoff_max_seconds, (int, float))
+            or self.backoff_max_seconds < self.interval_seconds
+        ):
+            raise InvalidConfigError(
+                "RefreshConfig 'backoff_max_seconds' must be a number "
+                ">= interval_seconds; "
+                f"got {self.backoff_max_seconds!r}"
+            )
+
+
+@dataclass(frozen=True)
 class SDKConfig:
     """Top-level SDK initialization configuration.
 
@@ -106,6 +172,13 @@ class SDKConfig:
             *gets/uses* this logger — it NEVER calls ``logging.basicConfig()``,
             adds handlers, or sets the level (library logging discipline); the
             application owns handler/level configuration.
+        refresh: Optional :class:`RefreshConfig` opting a remote (``sdk_key``)
+            instance into post-MVP automatic config refresh (Story 5.2 / FR31).
+            ``None`` (the default) preserves MVP behavior byte-for-byte: no
+            daemon thread, no refresh events, no added cost. Supplying a policy
+            in direct-config (``data``) mode spins up no worker — there is no
+            remote endpoint to poll — and the SDK emits a ``refresh.skipped``
+            diagnostic rather than silently ignoring the misconfiguration.
     """
 
     sdk_key: Optional[str] = None
@@ -117,6 +190,7 @@ class SDKConfig:
     auto_flush_interval_ms: Optional[int] = None
     data_store: Optional[Any] = None
     logger: Optional[logging.Logger] = None
+    refresh: Optional[RefreshConfig] = None
 
     def __post_init__(self) -> None:
         has_key = self.sdk_key is not None
