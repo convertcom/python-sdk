@@ -353,6 +353,61 @@ class TestRefreshFailureHandling:
             core.close()
 
 
+class TestWorkerResilience:
+    def test_swap_callback_exception_does_not_kill_worker(self) -> None:
+        """An error escaping _do_refresh (e.g. swap callback) is caught and the
+        worker survives (refresh.worker_crashed guard)."""
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+
+        def _boom(_snapshot: Any) -> None:
+            raise RuntimeError("swap blew up")
+
+        transport = _FakeTransport([_config_payload(), _config_payload()])
+        refresher = ConfigRefresher(
+            config=_remote_config(RefreshConfig(interval_seconds=300)),
+            transport=transport,
+            on_snapshot=_boom,
+        )
+        refresher.start()
+        try:
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+            # Worker absorbed the callback failure and is still running.
+            assert refresher.is_alive()
+            # And it can still complete a subsequent cycle.
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+        finally:
+            refresher.stop()
+
+    def test_stop_is_safe_from_worker_thread(self) -> None:
+        """Calling stop() re-entrantly from the worker thread must not deadlock."""
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+        from convert_sdk.errors import ConfigLoadError
+
+        policy = RefreshConfig(interval_seconds=300, backoff_max_seconds=300)
+        holder: Dict[str, Any] = {}
+
+        def _terminal(_exc: BaseException) -> None:
+            # Re-entrant stop from inside the worker thread.
+            holder["refresher"].stop()
+
+        transport = _FakeTransport([ConfigLoadError("boom")])
+        refresher = ConfigRefresher(
+            config=_remote_config(policy),
+            transport=transport,
+            on_snapshot=lambda _s: None,
+            on_terminal_failure=_terminal,
+        )
+        holder["refresher"] = refresher
+        refresher.start()
+        refresher.trigger_now()
+        # If self-join were attempted this would hang; the seam must resolve.
+        assert refresher.wait_for_next_refresh(timeout=5.0)
+        refresher.stop()
+        assert not refresher.is_alive()
+
+
 class TestConfigUpdatedEvent:
     def test_config_updated_emitted_on_successful_swap(self) -> None:
         from convert_sdk import LifecycleEvent
