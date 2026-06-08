@@ -1,0 +1,1589 @@
+{
+  "generated_from": {
+    "reference": "Convert JavaScript SDK (../javascript-sdk)",
+    "js_sdk_commit": "34f0a7a461722e628d28db88dc8098ed089efbfe",
+    "derivation": "DataManager entity lookup + SegmentsManager custom segments (packages/data, packages/segments)",
+    "method": "machine-derived by running a dependency-free faithful Node port of the JS reference source (scripts/js_reference/emit_state.js); values are computed, never hand-authored",
+    "generator": "scripts/generate_parity_fixtures.py"
+  },
+  "vectors": [
+    {
+      "id": "key_experiences_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "experiences",
+        "key": "exp-one"
+      },
+      "expected": "e1"
+    },
+    {
+      "id": "key_features_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "features",
+        "key": "feat-one"
+      },
+      "expected": "f1"
+    },
+    {
+      "id": "key_goals_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "goals",
+        "key": "goal-one"
+      },
+      "expected": "g1"
+    },
+    {
+      "id": "key_audiences_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "audiences",
+        "key": "aud-one"
+      },
+      "expected": "a1"
+    },
+    {
+      "id": "key_segments_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "segments",
+        "key": "seg-ruleless"
+      },
+      "expected": "s1"
+    },
+    {
+      "id": "key_unknown_miss",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "experiences",
+        "key": "nope"
+      },
+      "expected": null
+    },
+    {
+      "id": "key_wrong_type_miss",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity",
+        "entity_type": "goals",
+        "key": "exp-one"
+      },
+      "expected": null
+    },
+    {
+      "id": "id_experiences_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity_by_id",
+        "entity_type": "experiences",
+        "id": "e1"
+      },
+      "expected": "e1"
+    },
+    {
+      "id": "id_features_hit",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity_by_id",
+        "entity_type": "features",
+        "id": "f1"
+      },
+      "expected": "f1"
+    },
+    {
+      "id": "id_unknown_miss",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entity_by_id",
+        "entity_type": "features",
+        "id": "zz"
+      },
+      "expected": null
+    },
+    {
+      "id": "multi_all_match",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entities",
+        "entity_type": "goals",
+        "keys": [
+          "goal-one",
+          "goal-two"
+        ]
+      },
+      "expected": [
+        "g1",
+        "g2"
+      ]
+    },
+    {
+      "id": "multi_partial_skip_unknown",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entities",
+        "entity_type": "goals",
+        "keys": [
+          "goal-one",
+          "nope"
+        ]
+      },
+      "expected": [
+        "g1"
+      ]
+    },
+    {
+      "id": "multi_all_unknown_empty",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entities",
+        "entity_type": "goals",
+        "keys": [
+          "x",
+          "y"
+        ]
+      },
+      "expected": []
+    },
+    {
+      "id": "multi_empty_keys_empty",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "get_entities",
+        "entity_type": "goals",
+        "keys": []
+      },
+      "expected": []
+    },
+    {
+      "id": "segment_ruleless_unconditional",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "select_custom_segments",
+        "segment_keys": [
+          "seg-ruleless"
+        ],
+        "segment_rule": null
+      },
+      "expected": [
+        "s1"
+      ]
+    },
+    {
+      "id": "segment_rule_match",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "select_custom_segments",
+        "segment_keys": [
+          "seg-country-us"
+        ],
+        "segment_rule": {
+          "country": "US"
+        }
+      },
+      "expected": [
+        "s2"
+      ]
+    },
+    {
+      "id": "segment_rule_no_match",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "select_custom_segments",
+        "segment_keys": [
+          "seg-country-us"
+        ],
+        "segment_rule": {
+          "country": "CA"
+        }
+      },
+      "expected": []
+    },
+    {
+      "id": "segment_unknown_key_empty",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456",
+          "key": "proj-key"
+        },
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "exp-one",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "var-one"
+              }
+            ]
+          },
+          {
+            "id": "e2",
+            "key": "exp-two",
+            "variations": []
+          }
+        ],
+        "features": [
+          {
+            "id": "f1",
+            "key": "feat-one",
+            "variables": []
+          }
+        ],
+        "goals": [
+          {
+            "id": "g1",
+            "key": "goal-one"
+          },
+          {
+            "id": "g2",
+            "key": "goal-two"
+          }
+        ],
+        "audiences": [
+          {
+            "id": "a1",
+            "key": "aud-one"
+          }
+        ],
+        "segments": [
+          {
+            "id": "s1",
+            "key": "seg-ruleless"
+          },
+          {
+            "id": "s2",
+            "key": "seg-country-us",
+            "rules": {
+              "OR": [
+                {
+                  "AND": [
+                    {
+                      "OR_WHEN": [
+                        {
+                          "matching": {
+                            "match_type": "equals",
+                            "negated": false
+                          },
+                          "key": "country",
+                          "value": "US"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "operation": {
+        "op": "select_custom_segments",
+        "segment_keys": [
+          "nope"
+        ],
+        "segment_rule": null
+      },
+      "expected": []
+    }
+  ]
+}

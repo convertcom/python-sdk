@@ -1,11 +1,10 @@
 {
   "generated_from": {
-    "reference": "npm `murmurhash` package v3 algorithm (faithful port), as imported by Convert JS SDK packages/utils/src/string-utils.ts generateHash",
-    "semantics": "charCodeAt(i) & 0xff over UTF-16 code units; length mix uses code-unit count",
-    "default_seed": 9999,
-    "output": "unsigned 32-bit integer [0, 2^32)",
-    "generator": "scripts/generate_bucketing_vectors.js",
-    "sourced": "machine-derived via node (story 1.4; long-term ownership: story 3.5 / qs-05)"
+    "reference": "Convert JavaScript SDK (../javascript-sdk)",
+    "js_sdk_commit": "34f0a7a461722e628d28db88dc8098ed089efbfe",
+    "derivation": "MurmurHash3-32 bucketing hash (packages/bucketing + utils generateHash, seed 9999)",
+    "method": "machine-derived by running a dependency-free faithful Node port of the JS reference source (scripts/js_reference/emit_bucketing.js); values are computed, never hand-authored",
+    "generator": "scripts/generate_parity_fixtures.py"
   },
   "vectors": [
     {
