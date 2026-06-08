@@ -45,6 +45,7 @@ class ContextState:
     visitor_id: str
     snapshot: "ConfigSnapshot"
     visitor_attributes: Mapping[str, Any] = field(default_factory=dict)
+    default_segments: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Store a defensive, read-only copy so caller-side mutation cannot leak
@@ -54,6 +55,15 @@ class ContextState:
                 self,
                 "visitor_attributes",
                 MappingProxyType(dict(self.visitor_attributes or {})),
+            )
+        # Story 3.3: default segments are a DISTINCT visitor-state concern, kept
+        # strictly separate from visitor_attributes (Critical Warning #7). They
+        # are copied defensively and wrapped read-only, exactly like attributes.
+        if not isinstance(self.default_segments, MappingProxyType):
+            object.__setattr__(
+                self,
+                "default_segments",
+                MappingProxyType(dict(self.default_segments or {})),
             )
 
     def with_overlay(self, overlay: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
@@ -102,4 +112,38 @@ class ContextState:
             visitor_id=self.visitor_id,
             snapshot=self.snapshot,
             visitor_attributes=merged,
+            default_segments=self.default_segments,
+        )
+
+    def with_segments(self, new_segments: Optional[Mapping[str, Any]]) -> "ContextState":
+        """Return a NEW :class:`ContextState` with ``new_segments`` merged in.
+
+        This is the immutable, PERSISTENT default-segment association operation
+        (Story 3.3 / FR14). It shallow-merges the stored default segments with
+        ``new_segments`` — new keys override touched keys, untouched keys persist
+        — mirroring the JS ``SegmentsManager.putSegments`` shallow-merge of the
+        stored ``segments`` with the new segment values.
+
+        The update targets ONLY the DISTINCT :attr:`default_segments` field;
+        ``visitor_attributes`` are carried through unchanged so segment state and
+        raw attribute state stay strictly separate (Critical Warning #7). The
+        original instance is never mutated: a fresh frozen ``ContextState`` is
+        returned, carrying the same ``visitor_id`` and the same
+        :class:`ConfigSnapshot` by reference (the snapshot is shared, never
+        copied or mutated per visitor — Critical Warning #10). When
+        ``new_segments`` is empty/``None`` the merge is a content-equal no-op
+        copy, preserving determinism (AC #4 / FR25).
+
+        This mirrors :meth:`with_attributes` for the segment field and is the
+        single shared segment-merge seam — callers persist the returned state
+        through the ``DataStore`` exactly as they do for attribute updates.
+        """
+        merged = dict(self.default_segments)
+        if new_segments:
+            merged.update(new_segments)
+        return ContextState(
+            visitor_id=self.visitor_id,
+            snapshot=self.snapshot,
+            visitor_attributes=self.visitor_attributes,
+            default_segments=merged,
         )
