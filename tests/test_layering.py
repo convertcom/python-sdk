@@ -134,6 +134,51 @@ def test_evaluation_segments_only_imports_allowed_layers():
     )
 
 
+def test_evaluation_entity_lookup_only_imports_allowed_layers():
+    # Story 3.4: evaluation/entity_lookup.py is L2. It may import L0 (domain/)
+    # and L1 (ports/) for typing, but must NOT import tracking/, adapters/,
+    # context.py, or core.py (architecture Forbidden-imports).
+    lookup = _SRC / "evaluation" / "entity_lookup.py"
+    assert lookup.exists(), "evaluation/entity_lookup.py (Story 3.4) must exist"
+    modules = _imported_modules(lookup)
+    forbidden_fragments = (
+        "convert_sdk.tracking",
+        "convert_sdk.adapters",
+        "convert_sdk.context",
+        "convert_sdk.core",
+    )
+    offenders = [
+        m for m in modules if any(frag in m for frag in forbidden_fragments)
+    ]
+    assert offenders == [], (
+        "evaluation/entity_lookup.py (L2) must not import "
+        f"tracking/adapters/context/core; forbidden imports found: {offenders}"
+    )
+
+
+def test_domain_config_snapshot_stays_l0_clean():
+    # Story 3.4 only extends the snapshot's by-key/by-id indexes; domain/ stays
+    # L0 (stdlib + _internal only) — it must NOT import ports/, evaluation/,
+    # adapters/, tracking/, context.py, or core.py.
+    snapshot = _SRC / "domain" / "config_snapshot.py"
+    modules = _imported_modules(snapshot)
+    forbidden_fragments = (
+        "convert_sdk.ports",
+        "convert_sdk.evaluation",
+        "convert_sdk.adapters",
+        "convert_sdk.tracking",
+        "convert_sdk.context",
+        "convert_sdk.core",
+    )
+    offenders = [
+        m for m in modules if any(frag in m for frag in forbidden_fragments)
+    ]
+    assert offenders == [], (
+        "domain/config_snapshot.py (L0) must import only stdlib + _internal; "
+        f"upward imports found: {offenders}"
+    )
+
+
 def test_ports_storage_does_not_import_concrete_adapter():
     # The L1 port defines only the protocol; the concrete class must have moved
     # out of ports/storage.py.
