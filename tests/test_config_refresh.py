@@ -164,12 +164,16 @@ class TestConfigRefresherWorker:
         )
         refresher.start()
         try:
+            # First triggered cycle fetches the first scripted payload.
             refresher.trigger_now()
             assert refresher.wait_for_next_refresh(timeout=5.0)
+            assert applied[-1].project_id == "proj-1"
+            # A second triggered cycle fetches the next scripted payload.
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+            assert applied[-1].project_id == "proj-2"
         finally:
             refresher.stop()
-        assert applied, "worker should have produced at least one snapshot"
-        assert applied[-1].project_id == "proj-2"
 
     def test_worker_thread_is_daemon(self) -> None:
         from convert_sdk.config_loader.refresh import ConfigRefresher
@@ -213,6 +217,8 @@ class TestCoreRefreshIntegration:
             assert core.current_config is not None
             assert core.current_config.project_id == "proj-1"
             core.refresh_now()
+            # Deterministic wait on the worker's cycle-done seam (no wall clock).
+            assert core._refresher.wait_for_next_refresh(timeout=5.0)  # type: ignore[attr-defined]
             assert core.current_config.project_id == "proj-2"
         finally:
             core.close()
