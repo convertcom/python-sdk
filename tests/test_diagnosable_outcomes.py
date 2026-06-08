@@ -218,3 +218,197 @@ def test_conversion_data_error_never_embeds_raw_value():
     text = str(err)
     assert "payload" in text
     assert "not a JSON primitive" in text
+
+
+# --- PY-3: additive Context.diagnose_* surface + log routing (FR50/FR51/FR52) -
+
+from convert_sdk.context import Context  # noqa: E402
+from convert_sdk.domain.config_snapshot import ConfigSnapshot  # noqa: E402
+
+VISITOR = "visitor-diag-001"
+
+# Self-contained snapshot: one always-qualifying experience carrying a feature
+# change, one audience-gated experience the visitor never matches, one goal.
+RESOLVING_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456"},
+    "audiences": [{"id": "a-never", "key": "never"}],
+    "experiences": [
+        {
+            "id": "e1",
+            "key": "open-exp",
+            "variations": [
+                {
+                    "id": "v1",
+                    "key": "treat",
+                    "traffic_allocation": 100.0,
+                    "changes": [
+                        {
+                            "type": "fullStackFeature",
+                            "data": {
+                                "feature_id": "f1",
+                                "variables_data": {"flag": "true"},
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            "id": "e2",
+            "key": "gated-exp",
+            "audiences": ["a-never"],
+            "variations": [{"id": "v2", "key": "only", "traffic_allocation": 100.0}],
+        },
+    ],
+    "features": [
+        {"id": "f1", "key": "open-feature", "variables": [{"key": "flag", "type": "boolean"}]},
+        {"id": "f2", "key": "orphan-feature"},
+    ],
+    "goals": [{"id": "g1", "key": "signup"}],
+}
+
+
+def _context(config=RESOLVING_CONFIG, *, visitor=VISITOR):
+    return Context(visitor, ConfigSnapshot.from_normalized(config))
+
+
+def test_diagnose_experience_resolved():
+    diag = _context().diagnose_experience("open-exp")
+    assert isinstance(diag, ExperienceDiagnostic)
+    assert diag.reason is DiagnosticReason.RESOLVED
+    assert diag.resolved
+
+
+def test_diagnose_experience_not_found():
+    diag = _context().diagnose_experience("nope")
+    assert diag.reason is DiagnosticReason.EXPERIENCE_NOT_FOUND
+
+
+def test_diagnose_experience_audience_mismatch():
+    diag = _context().diagnose_experience("gated-exp")
+    assert diag.reason is DiagnosticReason.AUDIENCE_MISMATCH
+
+
+def test_diagnose_feature_resolved():
+    diag = _context().diagnose_feature("open-feature")
+    assert isinstance(diag, FeatureDiagnostic)
+    assert diag.reason is DiagnosticReason.RESOLVED
+
+
+def test_diagnose_feature_not_found():
+    diag = _context().diagnose_feature("ghost")
+    assert diag.reason is DiagnosticReason.FEATURE_NOT_FOUND
+
+
+def test_diagnose_feature_not_in_selected_variations():
+    # f2/orphan-feature is declared but no variation carries its change.
+    diag = _context().diagnose_feature("orphan-feature")
+    assert diag.reason is DiagnosticReason.FEATURE_NOT_IN_SELECTED_VARIATIONS
+
+
+def test_diagnose_goal_resolved():
+    diag = _context().diagnose_goal("signup")
+    assert isinstance(diag, GoalDiagnostic)
+    assert diag.reason is DiagnosticReason.RESOLVED
+
+
+def test_diagnose_goal_not_found():
+    diag = _context().diagnose_goal("checkout")
+    assert diag.reason is DiagnosticReason.GOAL_NOT_FOUND
+
+
+def test_diagnose_entity_resolved():
+    diag = _context().diagnose_entity("experiences", "open-exp")
+    assert isinstance(diag, EntityDiagnostic)
+    assert diag.reason is DiagnosticReason.RESOLVED
+
+
+def test_diagnose_entity_not_found():
+    diag = _context().diagnose_entity("experiences", "missing")
+    assert diag.reason is DiagnosticReason.ENTITY_NOT_FOUND
+
+
+def test_diagnose_entity_project_mapping_required():
+    # A snapshot with no project id cannot resolve entities → PROJECT_MAPPING_REQUIRED.
+    no_project = dict(RESOLVING_CONFIG)
+    no_project.pop("project", None)
+    diag = _context(no_project).diagnose_entity("experiences", "open-exp")
+    assert diag.reason is DiagnosticReason.PROJECT_MAPPING_REQUIRED
+
+
+def test_all_eight_reason_codes_are_reachable():
+    """Every closed reason code is produced by at least one diagnose_* path."""
+    reached = {
+        _context().diagnose_experience("open-exp").reason,
+        _context().diagnose_experience("nope").reason,
+        _context().diagnose_experience("gated-exp").reason,
+        _context().diagnose_feature("orphan-feature").reason,
+        _context().diagnose_feature("ghost").reason,
+        _context().diagnose_goal("checkout").reason,
+        _context().diagnose_entity("experiences", "missing").reason,
+        _context(  # project mapping required
+            {k: v for k, v in RESOLVING_CONFIG.items() if k != "project"}
+        ).diagnose_entity("experiences", "open-exp").reason,
+    }
+    assert reached == set(DiagnosticReason)
+
+
+def test_existing_none_returning_callers_unaffected():
+    """The additive surface must not change the Story 3.4 None-return contract."""
+    ctx = _context()
+    assert ctx.get_config_entity("experiences", "missing") is None
+    assert ctx.get_config_entity_by_id("experiences", "missing") is None
+    assert ctx.get_config_entities("experiences", ["missing"]) == []
+    # And a resolving experience evaluation is unchanged (typed result, not diag).
+    assert ctx.run_experience("open-exp") is not None
+
+
+def test_diagnostic_miss_logs_include_reason_without_raw_visitor_data():
+    """Miss-path diagnostics route through log_safe with the reason, no raw PII."""
+    from convert_sdk._internal.redaction import fingerprint_visitor
+
+    pii_visitor = "raw-visitor-id-zzz"
+    ctx = Context(
+        pii_visitor,
+        ConfigSnapshot.from_normalized(RESOLVING_CONFIG),
+        visitor_attributes={"email": "user@co.com", "name": "Jane"},
+    )
+    with pytest_caplog_at_debug() as caplog:
+        diag = ctx.diagnose_experience("nope")
+    text = "\n".join(r.getMessage() for r in caplog.records if r.name == "convert_sdk")
+    # The reason code appears in the diagnostic log.
+    assert diag.reason.value in text
+    # NFR6/NFR51: no raw visitor id, email, or name leaks.
+    assert pii_visitor not in text
+    assert "user@co.com" not in text
+    assert "Jane" not in text
+    # Only the hashed reference may appear.
+    assert fingerprint_visitor(pii_visitor) in text
+
+
+import contextlib  # noqa: E402
+
+
+@contextlib.contextmanager
+def pytest_caplog_at_debug():
+    """Capture convert_sdk records at DEBUG using a temporary handler."""
+
+    class _Capture(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.records = []
+
+        def emit(self, record):
+            self.records.append(record)
+
+    log = logging.getLogger("convert_sdk")
+    handler = _Capture()
+    prev_level = log.level
+    log.setLevel(logging.DEBUG)
+    log.addHandler(handler)
+    try:
+        yield handler
+    finally:
+        log.removeHandler(handler)
+        log.setLevel(prev_level)
