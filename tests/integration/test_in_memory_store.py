@@ -276,3 +276,46 @@ def test_run_custom_segments_round_trip_then_evaluate(in_memory_store):
         assert visitor["segments"]["customSegments"] == ["s_us"]
     finally:
         core.close()
+
+
+# --- Story 3.4 — entity-lookup round-trip through the public SDK surface -----
+
+_LOOKUP_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456", "key": "proj-key"},
+    "experiences": [
+        {"id": "e1", "key": "exp-one", "variations": [{"id": "v1", "key": "var-one"}]},
+    ],
+    "features": [],
+    "goals": [{"id": "g1", "key": "purchase_completed"}],
+    "audiences": [],
+    "segments": [{"id": "s1", "key": "seg-one"}],
+}
+
+
+def test_entity_lookup_round_trip_through_public_surface(in_memory_store):
+    # End-to-end through the public SDK surface, offline, reusing the qs-06
+    # shared in_memory_store fixture: Core(SDKConfig(data=...)) -> create_context
+    # -> get_config_entity resolves a known entity (typed domain object) and
+    # returns None for an unknown one (Story 3.4 AC #1/#2).
+    config = SDKConfig(data=_LOOKUP_CONFIG, data_store=in_memory_store)
+    core = Core(config).initialize()
+    try:
+        ctx = core.create_context("visitor-lookup")
+
+        goal = ctx.get_config_entity("goals", "purchase_completed")
+        assert goal is not None
+        assert goal["id"] == "g1"
+
+        # by-id and multi-key over the same loaded snapshot.
+        assert ctx.get_config_entity_by_id("experiences", "e1")["key"] == "exp-one"
+        assert [e["id"] for e in ctx.get_config_entities("segments", ["seg-one"])] == [
+            "s1"
+        ]
+
+        # Unknown key / wrong type / unknown type -> None (no raise).
+        assert ctx.get_config_entity("goals", "does-not-exist") is None
+        assert ctx.get_config_entity("goals", "exp-one") is None
+        assert ctx.get_config_entity("widgets", "exp-one") is None
+    finally:
+        core.close()
