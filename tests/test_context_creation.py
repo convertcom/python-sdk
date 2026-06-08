@@ -300,23 +300,23 @@ def test_set_attributes_merges_new_keys_over_existing():
 def test_set_attributes_rebinds_state_without_in_place_mutation():
     core = _ready_core()
     ctx = core.create_context("visitor-1", visitor_attributes={"country": "CA"})
-    original_state = ctx._state  # noqa: SLF001 — internal rebind assertion
+    original_state = ctx._state
     ctx.set_attributes({"country": "US"})
     # set_attributes rebinds the context's state to a NEW ContextState; it does
     # NOT mutate the original frozen instance in place (Critical Warning #2).
-    assert ctx._state is not original_state  # noqa: SLF001
+    assert ctx._state is not original_state
     assert dict(original_state.visitor_attributes) == {"country": "CA"}
 
 
 def test_set_attributes_does_not_mutate_config_snapshot():
     core = _ready_core()
     ctx = core.create_context("visitor-1", visitor_attributes={"country": "CA"})
-    snapshot_before = ctx._state.snapshot  # noqa: SLF001
+    snapshot_before = ctx._state.snapshot
     exp_keys_before = [e.get("key") for e in core.current_config.experiences]
     ctx.set_attributes({"country": "US"})
     # The shared immutable snapshot is never mutated or rebound by an attribute
     # update (Critical Warning #1) — same object, same contents.
-    assert ctx._state.snapshot is snapshot_before  # noqa: SLF001
+    assert ctx._state.snapshot is snapshot_before
     assert [e.get("key") for e in core.current_config.experiences] == exp_keys_before
 
 
@@ -493,10 +493,10 @@ def test_set_segments_merges_new_keys_over_existing():
 def test_set_segments_rebinds_state_without_in_place_mutation():
     core = _ready_core()
     ctx = core.create_context("visitor-1")
-    before = ctx._state  # noqa: SLF001 — internal state under test
+    before = ctx._state
     ctx.set_segments({"browser": "chrome"})
     # A NEW ContextState is bound; the old frozen instance is untouched.
-    assert ctx._state is not before  # noqa: SLF001
+    assert ctx._state is not before
     assert dict(before.default_segments) == {}
 
 

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
 
 from convert_sdk import Core, SDKConfig
 from convert_sdk._internal.redaction import fingerprint_visitor

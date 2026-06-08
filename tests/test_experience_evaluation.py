@@ -13,7 +13,6 @@ Covers the visitor-scoped ``Context`` and its public evaluation surface:
   shared snapshot.
 """
 
-import pytest
 
 from convert_sdk import Context, Core, SDKConfig
 from convert_sdk.domain.results import ExperienceResult

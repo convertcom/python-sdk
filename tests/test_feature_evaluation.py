@@ -20,7 +20,7 @@ Behavioral guardrails (mirrors Story 1.5 intent + Story 1.4 evaluation reuse):
 
 import pytest
 
-from convert_sdk import Context, Core, FeatureResult, FeatureStatus, SDKConfig
+from convert_sdk import Core, FeatureResult, FeatureStatus, SDKConfig
 
 
 # Two variations carry a fullStackFeature change for feature "f1" (declared with

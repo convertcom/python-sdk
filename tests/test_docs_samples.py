@@ -89,7 +89,7 @@ def _run_sample(body: str) -> dict:
     test, proving the documented code path is broken.
     """
     namespace: dict = {"__name__": "__doc_sample__"}
-    exec(compile(body, "<doc-sample>", "exec"), namespace)  # noqa: S102
+    exec(compile(body, "<doc-sample>", "exec"), namespace)
     return namespace
 
 
