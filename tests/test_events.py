@@ -49,6 +49,10 @@ def test_lifecycle_event_has_exactly_the_expected_members():
         "CONVERSION",
         "API_QUEUE_RELEASED",
         "DATA_STORE_QUEUE_RELEASED",
+        # Story 4.2 additively introduces the diagnosable-outcome event (FR50/FR52)
+        # so miss-path diagnostics log the same closed reason code. Additive only;
+        # no existing member name/value changed.
+        "DIAGNOSTIC",
     }
 
 
