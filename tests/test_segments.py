@@ -239,3 +239,84 @@ def test_run_custom_segments_without_store_is_safe():
     result = ctx.run_custom_segments(["us-visitors"], {"country": "US"})
     assert result.matched_segment_ids == ("s_us",)
     assert list(ctx.default_segments.get("customSegments", [])) == ["s_us"]
+
+
+# --- Story 3.3 AC #4: FR25 determinism under segment association ------------
+
+_EVAL_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456"},
+    "segments": [
+        {"id": "s_us", "key": "us-visitors", "rules": _rule_country("US")},
+    ],
+    "experiences": [
+        {
+            "id": "e2",
+            "key": "us-experience",
+            "audiences": ["a1"],
+            "variations": [{"id": "v3", "key": "only", "traffic_allocation": 100.0}],
+        }
+    ],
+    "audiences": [
+        {"id": "a1", "key": "us-only", "rules": _rule_country("US")},
+    ],
+}
+
+
+def _eval_core() -> Core:
+    return Core(SDKConfig(data=_EVAL_CONFIG)).initialize()
+
+
+def test_set_segments_does_not_perturb_bucketed_variation():
+    core = _eval_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    before = ctx.run_experience("us-experience")
+    # Associating default segments feeds reporting only — it must NOT change the
+    # deterministic bucketed variation (bucketing keyed on identity + snapshot).
+    ctx.set_segments({"browser": "chrome"})
+    after = ctx.run_experience("us-experience")
+    assert before is not None and after is not None
+    assert before.variation_id == after.variation_id
+    assert before.experience_key == after.experience_key
+
+
+def test_run_custom_segments_does_not_perturb_bucketed_variation():
+    core = _eval_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    before = ctx.run_experience("us-experience")
+    ctx.run_custom_segments(["us-visitors"], {"country": "US"})
+    after = ctx.run_experience("us-experience")
+    assert before is not None and after is not None
+    assert before.variation_id == after.variation_id
+
+
+def test_noop_set_segments_is_content_equal_and_deterministic():
+    core = _eval_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    ctx.set_segments({"browser": "chrome"})
+    state_before = ctx._state  # noqa: SLF001
+    before = ctx.run_experience("us-experience")
+    # A no-op association (same values) must not change results (AC #4).
+    ctx.set_segments({"browser": "chrome"})
+    after = ctx.run_experience("us-experience")
+    assert dict(ctx._state.default_segments) == dict(state_before.default_segments)  # noqa: SLF001
+    assert before is not None and after is not None
+    assert before.variation_id == after.variation_id
+
+
+# --- Story 3.3 Task 7: public export surface --------------------------------
+
+
+def test_custom_segments_result_is_public_export():
+    import convert_sdk
+
+    assert "CustomSegmentsResult" in convert_sdk.__all__
+    assert convert_sdk.CustomSegmentsResult is CustomSegmentsResult
+
+
+def test_frozen_exports_remain_stable():
+    # Story 3.3 is additive — the previously frozen exports must still be present.
+    import convert_sdk
+
+    for name in ("Core", "Context", "__version__", "LifecycleEvent", "DataStore", "InMemoryDataStore"):
+        assert name in convert_sdk.__all__

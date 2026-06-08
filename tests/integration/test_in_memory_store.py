@@ -191,3 +191,88 @@ def test_round_trip_is_visitor_scoped(in_memory_store):
         assert ctx_b.run_experience("us-experience") is None
     finally:
         core.close()
+
+
+# --- Story 3.3 — default segments round-trip through the store --------------
+
+_SEGMENT_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456", "key": "proj-key"},
+    "audiences": [],
+    "experiences": [],
+    "features": [],
+    "goals": [{"id": "g1", "key": "purchase_completed"}],
+    "segments": [
+        {
+            "id": "s_us",
+            "key": "us-seg",
+            "rules": {
+                "OR": [
+                    {
+                        "AND": [
+                            {
+                                "OR_WHEN": [
+                                    {
+                                        "matching": {
+                                            "match_type": "equals",
+                                            "negated": False,
+                                        },
+                                        "key": "country",
+                                        "value": "US",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+        }
+    ],
+}
+
+
+def test_set_segments_round_trip_through_shared_store(in_memory_store):
+    # End-to-end through the public SDK surface, offline, using the qs-06 shared
+    # in_memory_store fixture: create -> set_segments -> re-create -> the fresh
+    # context reflects the persisted default segments (AC #1/#3, Task 8.8).
+    config = SDKConfig(data=_SEGMENT_CONFIG, data_store=in_memory_store)
+    core = Core(config).initialize()
+    try:
+        ctx = core.create_context("visitor-seg")
+        ctx.set_segments({"browser": "chrome", "country": "US"})
+
+        # A FRESH context for the same visitor rehydrates the persisted segments
+        # from the SAME injected store.
+        ctx2 = core.create_context("visitor-seg")
+        assert dict(ctx2.default_segments) == {"browser": "chrome", "country": "US"}
+
+        # The persisted state is observable under a visitor-scoped state key.
+        keys = _injected_keys(in_memory_store)
+        assert any(k.startswith("state:") and "visitor-seg" in k for k in keys)
+    finally:
+        core.close()
+
+
+def test_run_custom_segments_round_trip_then_evaluate(in_memory_store):
+    # create -> run_custom_segments (matches via the rule engine) -> re-create ->
+    # the rehydrated context carries the matched custom segments, and a tracked
+    # conversion's segments payload reflects them (FR15 + reporting carry).
+    from convert_sdk.tracking.payloads import build_tracking_payload
+
+    config = SDKConfig(data=_SEGMENT_CONFIG, data_store=in_memory_store)
+    core = Core(config).initialize()
+    try:
+        ctx = core.create_context("visitor-cs", visitor_attributes={"country": "US"})
+        result = ctx.run_custom_segments(["us-seg"])
+        assert result.matched_segment_ids == ("s_us",)
+
+        ctx2 = core.create_context("visitor-cs")
+        assert list(ctx2.default_segments.get("customSegments", [])) == ["s_us"]
+
+        conversion = ctx2.track_conversion("purchase_completed")
+        visitor = build_tracking_payload(
+            core.current_config, conversion.event
+        )["visitors"][0]
+        assert visitor["segments"]["customSegments"] == ["s_us"]
+    finally:
+        core.close()
