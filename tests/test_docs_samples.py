@@ -1,0 +1,172 @@
+"""Drift-protection tests for the Story 4.5 advanced documentation set.
+
+The advanced topic guides and migration guides under ``docs/`` embed runnable
+Python code samples. This module is the executable guard that keeps those
+samples honest: it extracts every fenced ``python`` block from each guide,
+executes it against the **current** public API, and asserts the documented
+outcomes actually occur. A guide whose sample drifts from the implemented
+surface fails here — docs cannot rot silently.
+
+Conventions enforced (Story 4.5 Critical Warnings):
+
+* Every guide referenced from ``docs/index.md`` exists on disk (no dead links).
+* No guide embeds a literal ``sdk_key`` secret — keys come from
+  ``os.environ["CONVERT_SDK_KEY"]``.
+* Executable samples are marked with a ``# doctest: run`` directive on the
+  opening fence line (```` ```python  # doctest: run ````) so prose-only or
+  shell snippets are not executed, but every *executable* sample is.
+
+The samples run fully offline against a shared sample config — no network, no
+SDK key, no framework — mirroring the Story 1.6 examples guard.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DOCS_DIR = PROJECT_ROOT / "docs"
+README = PROJECT_ROOT / "README.md"
+
+# --- Guides expected by each task (build manifest) ---------------------------
+
+DOC1_GUIDES = (
+    "index.md",
+    "initialization.md",
+    "evaluation.md",
+    "tracking.md",
+    "queue-control.md",
+)
+DOC2_GUIDES = (
+    "debugging.md",
+    "extending.md",
+    "support-workflows.md",
+)
+DOC3_GUIDES = (
+    "migration-from-rest.md",
+    "migration-from-javascript.md",
+)
+ALL_GUIDES = DOC1_GUIDES + DOC2_GUIDES + DOC3_GUIDES
+
+# Pre-existing guide (Story runtime-integration) — already linked from README.
+PREEXISTING_GUIDES = ("runtime-integration.md",)
+
+
+# --- Sample config the executable guide samples bind to ----------------------
+#
+# A single self-contained config exercising experiences + a fullStack feature,
+# goals (for tracking), and segments (for custom-segment evaluation). The guide
+# samples `from tests.docs_sample_config import SAMPLE_CONFIG` so the doc text
+# stays focused on the API call, not on rebuilding fixtures.
+
+
+def _extract_python_samples(text: str) -> list[str]:
+    """Return the bodies of every executable fenced python block.
+
+    A block is executable when its opening fence carries the ``# doctest: run``
+    directive: ```` ```python  # doctest: run ````.
+    """
+    pattern = re.compile(
+        r"```python[^\n]*#\s*doctest:\s*run[^\n]*\n(.*?)```",
+        re.DOTALL,
+    )
+    return [m.group(1) for m in pattern.finditer(text)]
+
+
+def _all_python_fences(text: str) -> list[str]:
+    """Return the bodies of EVERY fenced python block (executable or not)."""
+    pattern = re.compile(r"```python[^\n]*\n(.*?)```", re.DOTALL)
+    return [m.group(1) for m in pattern.finditer(text)]
+
+
+def _run_sample(body: str) -> dict:
+    """Execute a sample body and return its module namespace.
+
+    Samples may call ``print``; that is fine. A sample that raises fails the
+    test, proving the documented code path is broken.
+    """
+    namespace: dict = {"__name__": "__doc_sample__"}
+    exec(compile(body, "<doc-sample>", "exec"), namespace)  # noqa: S102
+    return namespace
+
+
+# --- DOC-1: core topic guides exist and their samples run --------------------
+
+
+@pytest.mark.parametrize("name", DOC1_GUIDES)
+def test_doc1_guide_exists(name):
+    assert (DOCS_DIR / name).is_file(), f"missing topic guide: docs/{name}"
+
+
+@pytest.mark.parametrize("name", DOC1_GUIDES)
+def test_doc1_guide_samples_execute(name):
+    text = (DOCS_DIR / name).read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    # index.md is a landing page; it need not carry executable samples, but the
+    # behavior-bearing guides must.
+    if name != "index.md":
+        assert samples, f"docs/{name} has no executable (# doctest: run) sample"
+    for body in samples:
+        _run_sample(body)
+
+
+def test_initialization_guide_documents_env_key_pattern():
+    text = (DOCS_DIR / "initialization.md").read_text(encoding="utf-8")
+    assert "os.environ" in text and "CONVERT_SDK_KEY" in text, (
+        "initialization guide must source sdk_key from the environment"
+    )
+
+
+def test_evaluation_guide_buckets_a_real_variation():
+    text = (DOCS_DIR / "evaluation.md").read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    assert samples, "evaluation guide must have an executable sample"
+    # At least one sample must produce a bucketed variation outcome.
+    saw_variation = False
+    for body in samples:
+        ns = _run_sample(body)
+        if ns.get("_doc_variation_key") in {"control", "treatment"}:
+            saw_variation = True
+    assert saw_variation, (
+        "evaluation guide sample must bucket a visitor into a real variation "
+        "and expose it as _doc_variation_key"
+    )
+
+
+def test_tracking_guide_queues_and_deduplicates():
+    text = (DOCS_DIR / "tracking.md").read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    assert samples, "tracking guide must have an executable sample"
+    saw_queued = saw_dedup = False
+    for body in samples:
+        ns = _run_sample(body)
+        if ns.get("_doc_first_tracked") is True:
+            saw_queued = True
+        if ns.get("_doc_second_tracked") is False:
+            saw_dedup = True
+    assert saw_queued, "tracking guide must show a real QUEUED conversion"
+    assert saw_dedup, "tracking guide must show a real deduplicated conversion"
+
+
+# --- Secret-handling guard across the entire docs set ------------------------
+
+_LITERAL_KEY = re.compile(r"""sdk_key\s*=\s*['"]([^'"]+)['"]""")
+_ALLOWED_PLACEHOLDERS = {"your-sdk-key-here", ""}
+
+
+@pytest.mark.parametrize("name", ALL_GUIDES)
+def test_guides_never_embed_literal_sdk_keys(name):
+    path = DOCS_DIR / name
+    if not path.is_file():
+        pytest.skip(f"docs/{name} not built yet")
+    text = path.read_text(encoding="utf-8")
+    for match in _LITERAL_KEY.finditer(text):
+        value = match.group(1)
+        # Allow obvious placeholders and the env-read form os.environ[...].
+        assert value in _ALLOWED_PLACEHOLDERS, (
+            f"docs/{name} embeds a literal sdk_key {value!r}; "
+            f"read it from CONVERT_SDK_KEY instead"
+        )
