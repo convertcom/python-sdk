@@ -148,6 +148,9 @@ class Core:
             location_attributes=location_attributes,
             tracker=self._tracker,
             data_store=self._data_store,
+            # Story 4.3: forward the config environment so per-visitor
+            # diagnostics carry the cross-SDK-comparable environment qualifier.
+            environment=self._config.environment,
         )
 
     def _hydrate_visitor_state(
