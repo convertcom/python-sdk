@@ -1,0 +1,179 @@
+# CI pipeline for the Convert Python SDK (Story 5.1, qs-02 / qs-03 / qs-09 / qs-10).
+#
+# Job graph (fail-fast lint/type-check before the matrix):
+#   lint -> type-check -> test (15-cell matrix) -> build
+#                      \-> bounds-check (lower/upper)
+#   changelog (PR-only, independent)
+#
+# All dependency resolution uses `uv` (never `pip install -e .`). The workflow is
+# `workflow_call`-able so release.yml can reuse it verbatim as the release gate.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call: {}
+
+# Cancel superseded runs on the same ref to keep the matrix under the merge ceiling.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pin the uv version for reproducible CI resolution.
+  UV_VERSION: "0.10.11"
+
+jobs:
+  lint:
+    name: Ruff lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Sync dev environment
+        run: uv sync --group dev
+      - name: Ruff lint
+        run: uv run ruff check src tests scripts
+
+  type-check:
+    name: mypy --strict
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Sync dev environment
+        run: uv sync --group dev
+      - name: mypy strict
+        run: uv run mypy --strict
+
+  test:
+    name: test (py${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: type-check
+    strategy:
+      fail-fast: false
+      matrix:
+        # 15-cell matrix: Python 3.9-3.13 x {ubuntu, macos, windows} (qs-02).
+        # Do NOT trim cells — NFR22 mandates the full CPython matrix.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Sync dev environment
+        run: uv sync --group dev --python ${{ matrix.python-version }}
+      - name: Run tests with coverage (project floor 85%)
+        run: >-
+          uv run pytest -p no:cacheprovider
+          --cov=convert_sdk --cov-report=term-missing --cov-fail-under=85
+      - name: Enforce evaluation/ coverage floor (95%)
+        run: >-
+          uv run coverage report
+          --include='*/convert_sdk/evaluation/*' --fail-under=95
+
+  bounds-check:
+    name: bounds-check (${{ matrix.bound }})
+    runs-on: ubuntu-latest
+    needs: type-check
+    strategy:
+      fail-fast: false
+      matrix:
+        # Lower bound: oldest declared deps (httpx==0.28.0) on the oldest Python.
+        # Upper bound: newest compatible deps on the newest Python (qs-09).
+        include:
+          - bound: lower
+            python-version: "3.9"
+          - bound: upper
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Sync dev environment (lower bound — apply override constraints)
+        if: matrix.bound == 'lower'
+        run: >-
+          uv sync --group dev --python ${{ matrix.python-version }}
+          --resolution lowest-direct
+      - name: Pin runtime deps to declared lower bounds
+        if: matrix.bound == 'lower'
+        run: uv pip install --constraint ci/lower-bounds-overrides.txt httpx
+      - name: Sync dev environment (upper bound — newest compatible)
+        if: matrix.bound == 'upper'
+        run: >-
+          uv sync --group dev --python ${{ matrix.python-version }}
+          --upgrade
+      - name: Run unit + integration suite (parity covered elsewhere)
+        run: >-
+          uv run pytest -p no:cacheprovider --ignore=tests/parity
+
+  changelog:
+    name: changelog fragment
+    runs-on: ubuntu-latest
+    # Only meaningful on PRs (push to main happens after merge, when the fragment
+    # has already been validated). Non-blocking on release/tag refs.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Sync dev environment
+        run: uv sync --group dev
+      - name: Require a changelog fragment (towncrier)
+        run: uv run towncrier check --compare-with origin/${{ github.base_ref }}
+
+  build:
+    name: build (wheel + sdist)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Build distributions
+        run: uv build
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error

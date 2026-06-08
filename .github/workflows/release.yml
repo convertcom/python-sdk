@@ -1,0 +1,131 @@
+# Tag-triggered release + PyPI publish for the Convert Python SDK
+# (Story 5.1, qs-11 / qs-10).
+#
+# Trigger: a `v*` tag push only (e.g. v0.1.0, v0.1.0rc1). On any other event this
+# workflow is a no-op (it has no other triggers).
+#
+# Flow: CI gate (reuses ci.yml) -> verify version matches the tag -> compile the
+# towncrier changelog -> uv build -> publish to PyPI via OIDC Trusted Publishing
+# (NO long-lived tokens) -> create a GitHub Release with the compiled changelog.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  # Reuse the full CI pipeline as the release gate. If any matrix cell, lint,
+  # type-check, bounds-check, or build fails, the downstream publish never runs.
+  ci-gate:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-latest
+    needs: ci-gate
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.10.11"
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Sync dev environment
+        run: uv sync --group dev
+      - name: Verify tag matches the package version
+        id: version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(uv run python -c 'from convert_sdk.version import __version__; print(__version__)')"
+          echo "tag=$tag pkg=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag ($tag) does not match package version ($pkg)"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+      - name: Compile changelog from towncrier fragments
+        run: uv run towncrier build --yes --version "${{ steps.version.outputs.version }}"
+      - name: Extract release notes for this version
+        run: >-
+          uv run python scripts/extract_release_notes.py
+          --version "${{ steps.version.outputs.version }}"
+          --output release-notes.md
+      - name: Build wheel + sdist
+        run: uv build
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: |
+            dist/*
+            release-notes.md
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI (OIDC)
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: pypi
+      url: https://pypi.org/p/convert-python-sdk
+    permissions:
+      # OIDC Trusted Publishing requires id-token: write. NO PyPI tokens are
+      # stored in repository secrets (qs-11 Critical Warning #1).
+      id-token: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+      - name: Publish distributions to PyPI
+        # Trusted Publisher must be configured on pypi.org for this repo +
+        # workflow (one-time manual step — see docs/release-process.md). No
+        # password/token input: the action exchanges the OIDC token.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, publish-pypi]
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+      - name: Determine prerelease flag
+        id: prerelease
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # Mark a/b/rc/dev/alpha/beta tags as prereleases on the GitHub Release.
+          if echo "$tag" | grep -Eiq '(a|b|rc|dev|alpha|beta)[0-9]*$'; then
+            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create the GitHub Release with the compiled changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          --repo "${GITHUB_REPOSITORY}"
+          --title "${GITHUB_REF_NAME}"
+          --notes-file release-notes.md
+          ${{ steps.prerelease.outputs.flag }}
+          dist/*
