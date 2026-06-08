@@ -229,6 +229,111 @@ def test_extending_guide_lists_the_real_protocol_seams():
         assert seam in text, f"extending guide must reference {seam}"
 
 
+# --- DOC-3: migration guides + README cross-links ----------------------------
+
+
+@pytest.mark.parametrize("name", DOC3_GUIDES)
+def test_doc3_guide_exists(name):
+    assert (DOCS_DIR / name).is_file(), f"missing migration guide: docs/{name}"
+
+
+@pytest.mark.parametrize("name", DOC3_GUIDES)
+def test_doc3_guide_samples_execute(name):
+    text = (DOCS_DIR / name).read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    assert samples, f"docs/{name} has no executable (# doctest: run) sample"
+    for body in samples:
+        _run_sample(body)
+
+
+def test_rest_migration_guide_maps_endpoints_and_improvements():
+    text = (DOCS_DIR / "migration-from-rest.md").read_text(encoding="utf-8").lower()
+    # Must map the two raw REST flows onto the SDK surface.
+    assert "config" in text and "track" in text
+    # Must call out the operational improvements over raw REST.
+    for improvement in ("batch", "dedup", "lifecycle", "redact"):
+        assert improvement in text, (
+            f"REST migration guide must call out the {improvement!r} improvement"
+        )
+
+
+def test_rest_migration_sdk_side_sample_produces_real_outcome():
+    text = (DOCS_DIR / "migration-from-rest.md").read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    saw_outcome = False
+    for body in samples:
+        ns = _run_sample(body)
+        if ns.get("_doc_rest_tracked") is True:
+            saw_outcome = True
+    assert saw_outcome, (
+        "REST migration guide must show the SDK-side flow producing a real "
+        "tracked conversion"
+    )
+
+
+def test_js_migration_guide_documents_pythonic_differences():
+    text = (DOCS_DIR / "migration-from-javascript.md").read_text(encoding="utf-8")
+    lower = text.lower()
+    # Maps the JS concepts.
+    for js_concept in (
+        "runExperience",
+        "runFeature",
+        "setDefaultSegments",
+        "runCustomSegments",
+    ):
+        assert js_concept in text, f"JS migration guide must map {js_concept}"
+    # Maps to the Pythonic equivalents.
+    for py_equiv in (
+        "run_experience",
+        "run_feature",
+        "set_segments",
+        "run_custom_segments",
+    ):
+        assert py_equiv in text, f"JS migration guide must name {py_equiv}"
+    # Documents the deliberate Pythonic differences (not a syntax port).
+    for difference in ("snake_case", "mutator", "dataclass", "protocol"):
+        assert difference in lower, (
+            f"JS migration guide must document the {difference!r} difference"
+        )
+
+
+def test_js_migration_sdk_side_sample_runs():
+    text = (DOCS_DIR / "migration-from-javascript.md").read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    saw = False
+    for body in samples:
+        ns = _run_sample(body)
+        if ns.get("_doc_js_variation") in {"control", "treatment"}:
+            saw = True
+    assert saw, "JS migration guide must show the Pythonic equivalent bucketing a visitor"
+
+
+# --- README cross-links + dead-link guard ------------------------------------
+
+
+def test_readme_links_to_docs_index():
+    text = README.read_text(encoding="utf-8")
+    assert "docs/index.md" in text, "README must link to the docs index"
+
+
+def test_readme_links_to_migration_guides():
+    text = README.read_text(encoding="utf-8")
+    assert "docs/migration-from-rest.md" in text
+    assert "docs/migration-from-javascript.md" in text
+
+
+def test_docs_index_has_no_dead_links_to_guides():
+    """Every docs/*.md link in the index must resolve to a real file."""
+    index_text = (DOCS_DIR / "index.md").read_text(encoding="utf-8")
+    linked = set(re.findall(r"\(([a-z0-9-]+\.md)\)", index_text))
+    # The index links to every guide except itself.
+    must_link = (set(ALL_GUIDES) | set(PREEXISTING_GUIDES)) - {"index.md"}
+    for name in must_link:
+        assert name in linked, f"docs/index.md does not link to {name}"
+    for name in linked:
+        assert (DOCS_DIR / name).is_file(), f"docs/index.md links to missing docs/{name}"
+
+
 # --- Secret-handling guard across the entire docs set ------------------------
 
 _LITERAL_KEY = re.compile(r"""sdk_key\s*=\s*['"]([^'"]+)['"]""")
