@@ -16,6 +16,7 @@ hierarchy (``ConvertSDKError`` and its subclasses), without altering the frozen
 Story 1.1 boundary.
 """
 
+from convert_sdk.adapters.storage.in_memory import InMemoryDataStore
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.context import Context
 from convert_sdk.core import Core
@@ -35,6 +36,7 @@ from convert_sdk.errors import (
     TransportError,
 )
 from convert_sdk.events import LifecycleEvent
+from convert_sdk.ports.storage import DataStore
 from convert_sdk.version import __version__
 
 __all__ = [
@@ -64,4 +66,9 @@ __all__ = [
     # Lifecycle events public surface (Story 2.4): consumers need this enum to
     # call Core.on(LifecycleEvent.API_QUEUE_RELEASED, ...).
     "LifecycleEvent",
+    # Story 3.1 persistence boundary: the DataStore protocol (adapter authors
+    # type-annotate against it) and the in-memory default adapter (the
+    # user-visible SDKConfig.data_store default per the PRD Config Option Matrix).
+    "DataStore",
+    "InMemoryDataStore",
 ]

@@ -70,19 +70,29 @@ def test_inner_layers_do_not_import_concrete_in_memory_store():
     )
 
 
-def test_core_is_the_only_concrete_adapter_import_site():
-    # The composition root (core.py, L4) is the ONLY allowed import site for the
-    # concrete adapter across the whole package.
-    importers = []
+def test_core_is_the_only_inner_concrete_adapter_import_site():
+    # core.py (L4 composition root) is the ONLY ORCHESTRATION site allowed to
+    # import the concrete adapter. The package root __init__.py (L4 public
+    # surface) and the adapter package's own __init__.py (L3 re-export) are the
+    # only other legitimate import sites — they expose the class as a public API,
+    # they do not wire it into evaluation/tracking. Everything else is forbidden.
+    allowed = {
+        "core.py",
+        "__init__.py",  # package root public surface (re-export)
+        "adapters/storage/__init__.py",  # adapter package re-export
+        "adapters/storage/in_memory.py",  # the module that defines the class
+    }
+    offenders = []
     for path in _SRC.rglob("*.py"):
-        # The adapter module itself defines the class — skip it.
-        if path == _SRC / "adapters" / "storage" / "in_memory.py":
+        rel = str(path.relative_to(_SRC))
+        if rel in allowed:
             continue
         if _imports_concrete_adapter(path):
-            importers.append(str(path.relative_to(_SRC)))
-    assert importers == ["core.py"], (
-        "Only core.py may import the concrete InMemoryDataStore; "
-        f"found importers: {importers}"
+            offenders.append(rel)
+    assert offenders == [], (
+        "Only core.py (composition root) and the public/adapter re-export "
+        "__init__ modules may import the concrete InMemoryDataStore; "
+        f"unexpected importers: {offenders}"
     )
 
 

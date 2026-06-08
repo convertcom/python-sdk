@@ -53,7 +53,7 @@ from convert_sdk.logging import (
     log_queue_release_success,
     log_tracking_delivery_failure,
 )
-from convert_sdk.ports.storage import DataStore, resolve_data_store
+from convert_sdk.ports.storage import DataStore
 from convert_sdk.tracking.conversions import create_conversion
 from convert_sdk.tracking.deduplication import evaluate_dedup
 from convert_sdk.tracking.payloads import build_tracking_payload, event_has_goal_data
@@ -77,7 +77,13 @@ class Tracker:
         snapshot: The immutable config snapshot (supplies account/project ids
             and goal resolution).
         config: The :class:`~convert_sdk.config.SDKConfig` (supplies
-            ``batch_size``, ``sdk_key``, and the optional shared ``data_store``).
+            ``batch_size`` and ``sdk_key``).
+        data_store: The single per-:class:`~convert_sdk.core.Core`
+            :class:`~convert_sdk.ports.storage.DataStore`, injected by the
+            composition root. The tracker depends on the protocol only — it
+            never constructs or imports the concrete adapter (layering: L2 must
+            not import ``adapters/``). Story 3.1 moved dedup state behind this
+            injected boundary.
         transport: The transport used for delivery. May be ``None`` until a
             flush actually needs to deliver (an empty-queue flush never touches
             it). When delivery is required and no transport is available, the
@@ -93,6 +99,7 @@ class Tracker:
         *,
         snapshot: "ConfigSnapshot",
         config: "SDKConfig",
+        data_store: "DataStore",
         transport: Optional["Transport"] = None,
         transport_provider: Optional[Any] = None,
         event_bus: Optional["EventBus"] = None,
@@ -102,7 +109,10 @@ class Tracker:
         self._transport = transport
         self._transport_provider = transport_provider
         self._queue = TrackingQueue(batch_size=config.batch_size)
-        self._store: DataStore = resolve_data_store(config.data_store)
+        # Story 3.1: the per-Core DataStore is INJECTED by the composition root.
+        # The tracker depends only on the protocol — it never constructs or
+        # imports the concrete InMemoryDataStore (that is core.py's job, L4).
+        self._store: DataStore = data_store
         # Story 2.4: the single per-Core EventBus, injected by Core. May be None
         # for a Tracker constructed without one (e.g. a direct test) — emission
         # is then a guarded no-op so the tracking flow is unaffected.
