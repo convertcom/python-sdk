@@ -32,8 +32,13 @@ from convert_sdk.domain.context_state import ContextState
 from convert_sdk.domain.results import (
     ConversionResult,
     CustomSegmentsResult,
+    DiagnosticReason,
+    EntityDiagnostic,
+    ExperienceDiagnostic,
     ExperienceResult,
+    FeatureDiagnostic,
     FeatureResult,
+    GoalDiagnostic,
 )
 from convert_sdk.evaluation import entity_lookup
 from convert_sdk.evaluation.experiences import select_experience
@@ -330,6 +335,25 @@ class Context:
             outcome=result.status.value,
         )
 
+    def _log_diagnostic(self, entity_key: Optional[str], reason: DiagnosticReason) -> None:
+        """Emit an additive, allowlist-only diagnostic-outcome log record (FR52).
+
+        Routes through the SAME Story 4.1 :func:`log_safe` seam every other SDK
+        log call site uses (no separate diagnostics module) so support teams see
+        the identical closed ``reason`` code in logs and in the returned typed
+        diagnostic. Carries ONLY the entity key, the reason code, and a HASHED
+        visitor reference — never the raw ``visitor_id``, visitor attributes, or
+        any PII (NFR6/NFR51, Critical Warning #3). Observational only — it runs
+        after the diagnostic outcome is already determined and cannot change it.
+        """
+        log_safe(
+            LifecycleEvent.DIAGNOSTIC,
+            level=logging.DEBUG,
+            context=SafeContext(entity_key=entity_key),
+            visitor=fingerprint_visitor(self._state.visitor_id),
+            reason=reason.value,
+        )
+
     # --- evaluation surface ------------------------------------------------
 
     def _merge(
@@ -616,3 +640,199 @@ class Context:
             :meth:`get_config_entity`.)
         """
         return entity_lookup.resolve_entity_by_id(self._snapshot, entity_type, entity_id)
+
+    # --- diagnosable no-result outcomes (Story 4.2 / FR50) -----------------
+    #
+    # The ADDITIVE, opt-in typed-diagnostic surface. It names *why* a request
+    # did or did not resolve using the closed
+    # :class:`~convert_sdk.domain.results.DiagnosticReason` vocabulary, WITHOUT
+    # changing any existing return contract: ``run_experience`` / ``run_feature``
+    # / ``get_config_entity*`` keep their ``None``/``Optional`` shapes
+    # (Critical Warning #1). Each ``diagnose_*`` is a thin read-only wrapper over
+    # the same local evaluation/lookup helpers — it performs NO network I/O, does
+    # not mutate state, and leaves determinism untouched. A miss-path diagnostic
+    # is mirrored to the Story 4.1 log seam with the same reason code.
+
+    def diagnose_experience(
+        self,
+        experience_key: str,
+        *,
+        attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> ExperienceDiagnostic:
+        """Diagnose why an experience did or did not resolve for this visitor (FR50).
+
+        Returns a typed
+        :class:`~convert_sdk.domain.results.ExperienceDiagnostic` naming the
+        closed reason — ``EXPERIENCE_NOT_FOUND`` (no experience matches the key),
+        ``AUDIENCE_MISMATCH`` (the visitor does not qualify for the experience's
+        audience/location rules), or ``RESOLVED`` (the visitor qualifies and
+        buckets into a variation). Additive to :meth:`run_experience`, whose
+        ``Optional[ExperienceResult]`` return shape is unchanged.
+        """
+        visitor_attributes = self._state.with_overlay(attributes)
+        location = self._merge(self._location_attributes, location_attributes)
+        experience = self._snapshot.get_experience_by_key(experience_key)
+        if experience is None:
+            return self._diagnose(
+                ExperienceDiagnostic,
+                experience_key,
+                DiagnosticReason.EXPERIENCE_NOT_FOUND,
+                "no experience matches the requested key",
+                {"experience_key": experience_key},
+            )
+        result = select_experience(
+            experience_key,
+            self._snapshot,
+            visitor_id=self._state.visitor_id,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location,
+        )
+        if result is not None:
+            return self._diagnose(
+                ExperienceDiagnostic,
+                experience_key,
+                DiagnosticReason.RESOLVED,
+                "experience resolved to a variation",
+                {"experience_key": experience_key, "variation_key": result.variation_key},
+            )
+        # The experience exists but produced no result: the visitor did not
+        # qualify for (or bucket within) it — surfaced as an audience mismatch.
+        return self._diagnose(
+            ExperienceDiagnostic,
+            experience_key,
+            DiagnosticReason.AUDIENCE_MISMATCH,
+            "the visitor did not qualify for this experience",
+            {"experience_key": experience_key},
+        )
+
+    def diagnose_feature(
+        self,
+        feature_key: str,
+        *,
+        attributes: Optional[Mapping[str, Any]] = None,
+        location_attributes: Optional[Mapping[str, Any]] = None,
+    ) -> FeatureDiagnostic:
+        """Diagnose why a feature did or did not resolve for this visitor (FR50).
+
+        Returns a typed :class:`~convert_sdk.domain.results.FeatureDiagnostic`
+        naming the closed reason — ``FEATURE_NOT_FOUND`` (no feature matches the
+        key), ``FEATURE_NOT_IN_SELECTED_VARIATIONS`` (the feature is declared but
+        the visitor's selected variation(s) carry no change for it), or
+        ``RESOLVED``. Additive to :meth:`run_feature`.
+        """
+        visitor_attributes = self._state.with_overlay(attributes)
+        location = self._merge(self._location_attributes, location_attributes)
+        feature = self._snapshot.get_feature_by_key(feature_key)
+        if feature is None:
+            return self._diagnose(
+                FeatureDiagnostic,
+                feature_key,
+                DiagnosticReason.FEATURE_NOT_FOUND,
+                "no feature matches the requested key",
+                {"feature_key": feature_key},
+            )
+        result = resolve_feature(
+            feature_key,
+            self._snapshot,
+            visitor_id=self._state.visitor_id,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location,
+        )
+        if result is not None:
+            return self._diagnose(
+                FeatureDiagnostic,
+                feature_key,
+                DiagnosticReason.RESOLVED,
+                "feature resolved to an enabled state",
+                {"feature_key": feature_key},
+            )
+        return self._diagnose(
+            FeatureDiagnostic,
+            feature_key,
+            DiagnosticReason.FEATURE_NOT_IN_SELECTED_VARIATIONS,
+            "the feature is declared but not carried by the visitor's selected variations",
+            {"feature_key": feature_key},
+        )
+
+    def diagnose_goal(self, goal_key: str) -> GoalDiagnostic:
+        """Diagnose whether a goal resolves against the loaded config (FR50).
+
+        Returns a typed :class:`~convert_sdk.domain.results.GoalDiagnostic`
+        naming ``GOAL_NOT_FOUND`` (no goal matches the key) or ``RESOLVED``. This
+        is the typed counterpart to the
+        :class:`~convert_sdk.domain.results.ConversionStatus.GOAL_NOT_FOUND`
+        tracking outcome — :meth:`track_conversion`'s return shape is unchanged.
+        """
+        goal = self._snapshot.get_goal_by_key(goal_key)
+        if goal is None:
+            return self._diagnose(
+                GoalDiagnostic,
+                goal_key,
+                DiagnosticReason.GOAL_NOT_FOUND,
+                "no goal matches the requested key",
+                {"goal_key": goal_key},
+            )
+        return self._diagnose(
+            GoalDiagnostic,
+            goal_key,
+            DiagnosticReason.RESOLVED,
+            "goal resolved",
+            {"goal_key": goal_key},
+        )
+
+    def diagnose_entity(self, entity_type: str, key: str) -> EntityDiagnostic:
+        """Diagnose why a config-entity lookup did or did not resolve (FR50).
+
+        The additive, typed counterpart to :meth:`get_config_entity` (whose
+        ``None``-return contract is unchanged — Critical Warning #1). Returns a
+        typed :class:`~convert_sdk.domain.results.EntityDiagnostic` naming
+        ``PROJECT_MAPPING_REQUIRED`` (the loaded config has no project mapping, so
+        no entity can be resolved), ``ENTITY_NOT_FOUND`` (unknown key, wrong or
+        unsupported ``entity_type``), or ``RESOLVED``.
+        """
+        details = {"entity_type": entity_type, "entity_key": key}
+        if self._snapshot.project_id is None:
+            return self._diagnose(
+                EntityDiagnostic,
+                key,
+                DiagnosticReason.PROJECT_MAPPING_REQUIRED,
+                "the loaded config has no project mapping",
+                details,
+            )
+        entity = entity_lookup.resolve_entity(self._snapshot, entity_type, key)
+        if entity is None:
+            return self._diagnose(
+                EntityDiagnostic,
+                key,
+                DiagnosticReason.ENTITY_NOT_FOUND,
+                "no entity matches the requested key for this entity_type",
+                details,
+            )
+        return self._diagnose(
+            EntityDiagnostic,
+            key,
+            DiagnosticReason.RESOLVED,
+            "entity resolved",
+            details,
+        )
+
+    def _diagnose(
+        self,
+        cls: Any,
+        entity_key: Optional[str],
+        reason: DiagnosticReason,
+        message: str,
+        details: Mapping[str, Any],
+    ) -> Any:
+        """Build a typed diagnostic and mirror miss-path reasons to the log seam.
+
+        Centralizes the log emission so every ``diagnose_*`` path emits the SAME
+        allowlist-only, hashed-visitor diagnostic record through Story 4.1's
+        :func:`log_safe`. A ``RESOLVED`` outcome is not a miss, so it is not
+        logged (parity with the observational bucketing/conversion logs).
+        """
+        diagnostic = cls(reason=reason, message=message, details=details)
+        if reason is not DiagnosticReason.RESOLVED:
+            self._log_diagnostic(entity_key, reason)
+        return diagnostic

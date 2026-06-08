@@ -52,6 +52,11 @@ class LifecycleEvent(enum.Enum):
     CONVERSION = "conversion"
     API_QUEUE_RELEASED = "api.queue.released"
     DATA_STORE_QUEUE_RELEASED = "datastore.queue.released"
+    # Story 4.2: a diagnosable no-result outcome was produced (FR50/FR52). Emitted
+    # by the additive ``Context.diagnose_*`` surface so support teams see the same
+    # closed reason code in logs and in the returned typed diagnostic. Purely
+    # observational — emitting it never changes an evaluation/tracking outcome.
+    DIAGNOSTIC = "diagnostic"
 
 
 @dataclass(frozen=True)
