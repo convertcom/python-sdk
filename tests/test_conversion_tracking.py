@@ -176,6 +176,66 @@ def test_public_api_exports_conversion_types():
     assert convert_sdk.ConversionStatus is ConversionStatus
 
 
+# --- Story 3.3 Task 5: reporting carry of default segments ----------------
+#
+# A tracked conversion's ``segments`` payload field reflects the visitor's
+# active default segments at the time of conversion (FR14). The Story 2.2
+# serializer owns the field shape; Story 3.3 only makes the data available.
+
+
+def test_conversion_carries_active_default_segments_after_set_segments():
+    from convert_sdk.tracking.payloads import build_tracking_payload
+
+    snap = load_snapshot(CONFIG)
+    ctx = Context("v_a", snap)
+    ctx.set_segments({"browser": "chrome", "country": "US"})
+    result = ctx.track_conversion("purchase_completed")
+    assert result.event is not None
+    # The serialized conversion's segments field reflects the active default
+    # segments (filtered through the existing VisitorSegments allowlist).
+    visitor = build_tracking_payload(snap, result.event)["visitors"][0]
+    assert visitor["segments"] == {"browser": "chrome", "country": "US"}
+
+
+def test_conversion_carries_custom_segments_after_run_custom_segments():
+    from convert_sdk.tracking.payloads import build_tracking_payload
+
+    cfg = dict(CONFIG)
+    cfg["segments"] = [{"id": "s_us", "key": "us-seg", "rules": None}]
+    snap = load_snapshot(cfg)
+    ctx = Context("v_a", snap)
+    ctx.run_custom_segments(["us-seg"])  # rule-less → matches
+    result = ctx.track_conversion("purchase_completed")
+    assert result.event is not None
+    visitor = build_tracking_payload(snap, result.event)["visitors"][0]
+    # The matched custom-segment ids carry through under customSegments.
+    assert visitor["segments"]["customSegments"] == ["s_us"]
+
+
+def test_default_segments_take_precedence_over_attribute_segments():
+    from convert_sdk.tracking.payloads import build_tracking_payload
+
+    snap = load_snapshot(CONFIG)
+    ctx = Context("v_a", snap, visitor_attributes={"country": "DE"})
+    ctx.set_segments({"country": "US"})
+    result = ctx.track_conversion("purchase_completed")
+    visitor = build_tracking_payload(snap, result.event)["visitors"][0]
+    # Default segments are the explicit association → they win on key conflict.
+    assert visitor["segments"]["country"] == "US"
+
+
+def test_conversion_without_segments_unaffected():
+    # A visitor with no default segments keeps the prior attribute-derived
+    # segments behavior (no regression to Story 2.2).
+    from convert_sdk.tracking.payloads import build_tracking_payload
+
+    snap = load_snapshot(CONFIG)
+    ctx = Context("v_a", snap, visitor_attributes={"country": "US"})
+    result = ctx.track_conversion("purchase_completed")
+    visitor = build_tracking_payload(snap, result.event)["visitors"][0]
+    assert visitor["segments"] == {"country": "US"}
+
+
 # --- Story 2.3: dedup outcomes + force_multiple on the public surface -----
 
 
