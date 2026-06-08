@@ -64,16 +64,20 @@ class Context:
         snapshot: "ConfigSnapshot",
         *,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
+        default_segments: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         tracker: Optional["Tracker"] = None,
         data_store: Optional["DataStore"] = None,
     ) -> None:
-        # Visitor identity + stored attributes + snapshot linkage live in the
-        # typed ContextState (visitor state stays separate from the snapshot).
+        # Visitor identity + stored attributes + default segments + snapshot
+        # linkage live in the typed ContextState (visitor state stays separate
+        # from the snapshot; default segments are a DISTINCT field from raw
+        # attributes — Story 3.3, Critical Warning #7).
         self._state = ContextState(
             visitor_id=visitor_id,
             snapshot=snapshot,
             visitor_attributes=visitor_attributes,
+            default_segments=default_segments,
         )
         self._snapshot = snapshot
         # Story 2.3: shared tracking orchestrator (dedup + queue). When None,
@@ -107,6 +111,17 @@ class Context:
         read-only stored visitor state.
         """
         return self._state.visitor_attributes
+
+    @property
+    def default_segments(self) -> Mapping[str, Any]:
+        """A read-only view of this visitor's associated default segments.
+
+        Distinct from :attr:`visitor_attributes` (Story 3.3 / FR14): default
+        segments are a separate visitor-state concern that feeds reporting and
+        conversion attribution, not raw audience traits. Observable for
+        reporting/tracking without exposing the internal ``ContextState``.
+        """
+        return self._state.default_segments
 
     # --- mutable visitor state (Story 3.2) ---------------------------------
 
@@ -145,22 +160,65 @@ class Context:
         self._state = self._state.with_attributes(attributes)
         self._persist_visitor_state()
 
+    def set_segments(self, segments: dict[str, Any]) -> None:
+        """Persistently associate default visitor segments with this context (FR14).
+
+        Shallow-merges ``segments`` into the context's DISTINCT default-segment
+        state — new keys override touched keys, untouched keys persist — and
+        REBINDS the context's
+        :class:`~convert_sdk.domain.context_state.ContextState` to the merged
+        immutable copy (the same frozen-dataclass rebind + persist-through-store
+        pattern Story 3.2 used for :meth:`set_attributes`). The original frozen
+        state is never mutated in place, the shared immutable ``ConfigSnapshot``
+        is never touched, and the segments are kept STRICTLY SEPARATE from
+        :attr:`visitor_attributes` (Critical Warning #7).
+
+        Default segments feed reporting/conversion state — a subsequently tracked
+        conversion's ``segments`` payload reflects the visitor's active default
+        segments at conversion time — and a later
+        ``create_context(visitor_id)`` for the same visitor rehydrates them
+        through the injected ``DataStore`` (the same per-``Core`` persistence
+        boundary and visitor-scoped key Story 3.1 established). Deterministic
+        bucketing inputs (visitor identity + config snapshot) are unaffected
+        (FR25). This is the Python analogue of the JS
+        ``Context.setDefaultSegments`` → ``SegmentsManager.putSegments`` write
+        path.
+
+        Args:
+            segments: Default visitor segments to merge into the stored state.
+
+        Returns:
+            ``None``.
+        """
+        self._state = self._state.with_segments(segments)
+        self._persist_visitor_state()
+
     def _persist_visitor_state(self) -> None:
         """Persist the current visitor state through the injected ``DataStore``.
 
         No-op when no store is injected (a ``Context`` constructed directly
         rather than via ``Core``). The write is visitor-scoped: it targets only
         this visitor's state key (:func:`visitor_state_key`), never another
-        visitor's and never a ``Core``-global key. The persisted value is the
-        plain merged attribute ``dict`` so a later ``create_context(visitor_id)``
-        rehydrates it through the same store. The ``DataStore`` four-method
-        surface is unchanged — a plain ``set`` of serialized state; no business
-        logic lives in the store.
+        visitor's and never a ``Core``-global key.
+
+        The persisted value is a structured envelope
+        ``{"attributes": {...}, "segments": {...}}`` so a later
+        ``create_context(visitor_id)`` round-trips BOTH the visitor attributes
+        (Story 3.2) and the default segments (Story 3.3) through the same store
+        and hydrate route. The ``DataStore`` four-method surface is unchanged —
+        a plain ``set`` of serialized state; no business logic lives in the
+        store.
         """
         if self._data_store is None:
             return None
         key = visitor_state_key(self._state.visitor_id)
-        self._data_store.set(key, dict(self._state.visitor_attributes))
+        self._data_store.set(
+            key,
+            {
+                "attributes": dict(self._state.visitor_attributes),
+                "segments": dict(self._state.default_segments),
+            },
+        )
         return None
 
     # --- evaluation surface ------------------------------------------------

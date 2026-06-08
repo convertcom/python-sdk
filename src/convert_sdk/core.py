@@ -136,37 +136,64 @@ class Core:
         # context override matching keys (explicit construction wins). The read
         # is strictly visitor-scoped and goes through the DataStore protocol
         # only — Core (L4) owns the concrete store; downstream sees the protocol.
-        hydrated = self._hydrate_visitor_attributes(visitor_id, visitor_attributes)
+        hydrated, segments = self._hydrate_visitor_state(visitor_id, visitor_attributes)
         return Context(
             visitor_id,
             self._snapshot,
             visitor_attributes=hydrated,
+            default_segments=segments,
             location_attributes=location_attributes,
             tracker=self._tracker,
             data_store=self._data_store,
         )
 
-    def _hydrate_visitor_attributes(
+    def _hydrate_visitor_state(
         self,
         visitor_id: str,
         visitor_attributes: Optional[Mapping[str, Any]],
-    ) -> Optional[Mapping[str, Any]]:
-        """Merge any persisted visitor attributes with the caller-supplied ones.
+    ) -> tuple[Optional[Mapping[str, Any]], Optional[Mapping[str, Any]]]:
+        """Rehydrate persisted visitor attributes AND default segments.
 
-        Reads this visitor's persisted ``ContextState`` attributes (written by
-        :meth:`convert_sdk.context.Context.set_attributes`) through the single
-        per-Core ``DataStore`` and overlays the caller-supplied
-        ``visitor_attributes`` on top (explicit construction wins). Returns the
-        caller value unchanged when nothing is persisted, so contexts for
-        visitors that never called ``set_attributes`` behave exactly as before.
+        Reads this visitor's persisted ``ContextState`` envelope (written by
+        :meth:`convert_sdk.context.Context.set_attributes` /
+        :meth:`convert_sdk.context.Context.set_segments`) through the single
+        per-Core ``DataStore`` and returns ``(attributes, default_segments)``.
+
+        The persisted value is the structured envelope
+        ``{"attributes": {...}, "segments": {...}}`` (Story 3.3). For backward
+        compatibility a legacy Story 3.2 plain-attributes ``dict`` (no envelope)
+        is treated as attributes-only with empty segments. Caller-supplied
+        ``visitor_attributes`` for this fresh context overlay the persisted
+        attributes (explicit construction wins). The read is strictly
+        visitor-scoped and goes through the ``DataStore`` protocol only — Core
+        (L4) owns the concrete store; downstream sees the protocol. Returns the
+        caller value unchanged (and no segments) when nothing is persisted, so
+        contexts for visitors that never persisted state behave exactly as
+        before.
         """
         stored = self._data_store.get(visitor_state_key(visitor_id))
-        if not isinstance(stored, Mapping) or not stored:
-            return visitor_attributes
-        merged = dict(stored)
-        if visitor_attributes:
-            merged.update(visitor_attributes)
-        return merged
+        stored_attributes: Mapping[str, Any] = {}
+        stored_segments: Optional[Mapping[str, Any]] = None
+        if isinstance(stored, Mapping) and stored:
+            if "attributes" in stored or "segments" in stored:
+                # Story 3.3 structured envelope.
+                raw_attrs = stored.get("attributes")
+                stored_attributes = raw_attrs if isinstance(raw_attrs, Mapping) else {}
+                raw_segments = stored.get("segments")
+                if isinstance(raw_segments, Mapping) and raw_segments:
+                    stored_segments = dict(raw_segments)
+            else:
+                # Legacy Story 3.2 plain-attributes dict (attributes-only).
+                stored_attributes = stored
+
+        if not stored_attributes and not visitor_attributes:
+            attributes: Optional[Mapping[str, Any]] = visitor_attributes
+        else:
+            merged = dict(stored_attributes)
+            if visitor_attributes:
+                merged.update(visitor_attributes)
+            attributes = merged
+        return attributes, stored_segments
 
     # --- tracking flush ----------------------------------------------------
 
