@@ -96,6 +96,44 @@ def test_core_is_the_only_inner_concrete_adapter_import_site():
     )
 
 
+def _imported_modules(path: Path) -> list[str]:
+    """Return the dotted module names imported by ``path`` (from/plain imports)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    modules: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            modules.append(node.module or "")
+        elif isinstance(node, ast.Import):
+            modules.extend(alias.name for alias in node.names)
+    return modules
+
+
+def test_evaluation_segments_only_imports_allowed_layers():
+    # Story 3.3: evaluation/segments.py is L2. It may import L0 (domain/) and the
+    # sibling evaluation/rules.py, but must NOT import tracking/, adapters/,
+    # ports/ concretes, context.py, or core.py (architecture Forbidden-imports).
+    segments = _SRC / "evaluation" / "segments.py"
+    assert segments.exists(), "evaluation/segments.py (Story 3.3) must exist"
+    modules = _imported_modules(segments)
+    forbidden_fragments = (
+        "convert_sdk.tracking",
+        "convert_sdk.adapters",
+        "convert_sdk.context",
+        "convert_sdk.core",
+    )
+    offenders = [
+        m for m in modules if any(frag in m for frag in forbidden_fragments)
+    ]
+    assert offenders == [], (
+        "evaluation/segments.py (L2) must not import tracking/adapters/context/core; "
+        f"forbidden imports found: {offenders}"
+    )
+    # It SHOULD delegate rule matching to the sibling rule engine, not reimplement.
+    assert any("evaluation.rules" in m for m in modules), (
+        "evaluation/segments.py must delegate rule matching to evaluation/rules.py"
+    )
+
+
 def test_ports_storage_does_not_import_concrete_adapter():
     # The L1 port defines only the protocol; the concrete class must have moved
     # out of ports/storage.py.
