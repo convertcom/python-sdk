@@ -397,3 +397,104 @@ class TestTrackingMetadataRepoint:
             assert core._tracker._snapshot.project_id == "proj-2"  # type: ignore[attr-defined]
         finally:
             core.close()
+
+
+# --------------------------------------------------------------------------- #
+# Task 4 — MVP-stability + thread-safety regression
+# --------------------------------------------------------------------------- #
+
+
+class TestMVPStability:
+    def test_refresh_none_spins_up_no_daemon_thread(self) -> None:
+        before = threading.active_count()
+        transport = _FakeTransport([_config_payload()])
+        core = Core(_remote_config(None), transport=transport)
+        core.initialize()
+        try:
+            assert threading.active_count() == before
+            assert core._refresher is None  # type: ignore[attr-defined]
+        finally:
+            core.close()
+
+    def test_refresh_none_does_not_emit_config_updated_event(self) -> None:
+        from convert_sdk import LifecycleEvent
+
+        transport = _FakeTransport([_config_payload()])
+        core = Core(_remote_config(None), transport=transport)
+        seen: List[Any] = []
+        core.on(LifecycleEvent.CONFIG_UPDATED, lambda p, _e: seen.append(p))
+        core.initialize()
+        try:
+            core.refresh_now()  # no-op
+        finally:
+            core.close()
+        # No background refresh => no event-bus CONFIG_UPDATED emission.
+        assert seen == []
+
+    def test_existing_context_retains_prior_snapshot_after_swap(self) -> None:
+        transport = _FakeTransport(
+            [_config_payload(project_id="proj-1"), _config_payload(project_id="proj-2")]
+        )
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        core.initialize()
+        try:
+            ctx = core.create_context("visitor-1")
+            ctx_snapshot = ctx._snapshot  # type: ignore[attr-defined]
+            assert ctx_snapshot.project_id == "proj-1"
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=5.0)  # type: ignore[attr-defined]
+            # The live snapshot advanced...
+            assert core.current_config.project_id == "proj-2"
+            # ...but the already-created context keeps its creation-time view.
+            assert ctx._snapshot.project_id == "proj-1"  # type: ignore[attr-defined]
+        finally:
+            core.close()
+
+
+class TestThreadSafetySwap:
+    def test_concurrent_create_context_during_swap_is_coherent(self) -> None:
+        """Hammer create_context from many threads while a swap fires repeatedly.
+
+        Every context observed must be internally coherent: its snapshot is one
+        of the whole scripted snapshots (proj-1 or proj-2), never a torn hybrid,
+        and the snapshot's project_id matches its account_id binding.
+        """
+        payloads = [_config_payload(project_id="proj-1")]
+        # Provide many alternating payloads so the worker can swap repeatedly.
+        for i in range(200):
+            payloads.append(
+                _config_payload(project_id="proj-2" if i % 2 else "proj-1")
+            )
+        transport = _FakeTransport(payloads)
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        core.initialize()
+        observed: List[str] = []
+        errors: List[BaseException] = []
+        stop = threading.Event()
+
+        def _reader() -> None:
+            try:
+                while not stop.is_set():
+                    ctx = core.create_context("visitor-x")
+                    snap = ctx._snapshot  # type: ignore[attr-defined]
+                    # Coherence: a real snapshot with a known project + account.
+                    assert snap.account_id == "acc-1"
+                    assert snap.project_id in {"proj-1", "proj-2"}
+                    observed.append(snap.project_id)
+            except BaseException as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        readers = [threading.Thread(target=_reader) for _ in range(4)]
+        for t in readers:
+            t.start()
+        try:
+            for _ in range(50):
+                core.refresh_now()
+                core._refresher.wait_for_next_refresh(timeout=5.0)  # type: ignore[attr-defined]
+        finally:
+            stop.set()
+            for t in readers:
+                t.join(timeout=5.0)
+            core.close()
+        assert not errors, f"reader saw an incoherent snapshot: {errors}"
+        assert observed, "readers should have created contexts"
