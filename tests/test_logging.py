@@ -100,6 +100,28 @@ def test_log_safe_redaction_is_level_independent(caplog, level):
     assert "bearerSECRET" not in text
 
 
+def test_log_safe_redacts_pii_named_kwargs_structurally(caplog):
+    """NFR6 defense in depth: a value passed under a PII-like field name
+    (``visitor_id``/``attributes``/``email``/``name``) is structurally replaced
+    with ``[REDACTED]`` at record-construction time — it can never leak even if
+    a future call site passes one by mistake."""
+    with caplog.at_level(logging.DEBUG, logger="convert_sdk"):
+        log_safe(
+            LifecycleEvent.BUCKETING,
+            level=logging.DEBUG,
+            visitor_id="raw-visitor-123",
+            email="user@co.com",
+            name="Jane",
+            attributes={"plan": "pro"},
+        )
+    text = " ".join(r.getMessage() for r in caplog.records if r.name == "convert_sdk")
+    assert "raw-visitor-123" not in text
+    assert "user@co.com" not in text
+    assert "Jane" not in text
+    assert "plan" not in text
+    assert "[REDACTED]" in text
+
+
 # --- library-logging discipline ---------------------------------------------
 
 

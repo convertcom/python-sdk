@@ -47,6 +47,16 @@ logger = logging.getLogger("convert_sdk")
 #: masked at record-construction time (defense in depth — never level-gated).
 _URL_KWARGS = frozenset({"url", "endpoint"})
 _KEY_KWARGS = frozenset({"key", "sdk_key", "auth", "authorization", "token", "secret"})
+#: Field names that could carry raw PII if passed by mistake. They are
+#: structurally replaced with ``[REDACTED]`` at record-construction time so a
+#: raw ``visitor_id``/attribute value can never leak through ``log_safe`` even if
+#: a future call site passes one under a PII-like name (NFR6 defense in depth —
+#: correct call sites pass a hashed ``visitor`` reference instead).
+_PII_KWARGS = frozenset(
+    {"visitor_id", "attributes", "visitor_attributes", "email", "name"}
+)
+#: The structural PII placeholder (qs-08).
+_REDACTED = "[REDACTED]"
 
 
 def log_safe(
@@ -111,6 +121,8 @@ def _redact_field(name: str, value: Any) -> Any:
         return redact_url(str(value))
     if lname in _KEY_KWARGS:
         return redact_key(str(value))
+    if lname in _PII_KWARGS:
+        return _REDACTED
     return value
 
 
