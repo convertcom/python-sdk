@@ -101,3 +101,93 @@ def _injected_keys(store: InMemoryDataStore):
         if isinstance(value, dict):
             return list(value.keys())
     return []
+
+
+# --- Story 3.2 — mutable visitor state round-trip through the store ---------
+
+_AUDIENCE_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456", "key": "proj-key"},
+    "audiences": [
+        {
+            "id": "a1",
+            "key": "us-only",
+            "rules": {
+                "OR": [
+                    {
+                        "AND": [
+                            {
+                                "OR_WHEN": [
+                                    {
+                                        "matching": {
+                                            "match_type": "equals",
+                                            "negated": False,
+                                        },
+                                        "key": "country",
+                                        "value": "US",
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            },
+        }
+    ],
+    "experiences": [
+        {
+            "id": "e2",
+            "key": "us-experience",
+            "audiences": ["a1"],
+            "variations": [{"id": "v3", "key": "only", "traffic_allocation": 100.0}],
+        }
+    ],
+    "features": [],
+    "goals": [],
+    "segments": [],
+}
+
+
+def test_set_attributes_round_trip_through_shared_store(in_memory_store):
+    # End-to-end through the public SDK surface, offline, using the qs-06 shared
+    # in_memory_store fixture: create -> set_attributes -> re-create -> evaluate
+    # reflects the updated, persisted state (AC #2/#3).
+    config = SDKConfig(data=_AUDIENCE_CONFIG, data_store=in_memory_store)
+    core = Core(config).initialize()
+    try:
+        ctx = core.create_context("visitor-rt", visitor_attributes={"country": "CA"})
+        # Initially does not qualify for the US-only experience.
+        assert ctx.run_experience("us-experience") is None
+
+        # Persist a visitor-attribute update through the store.
+        ctx.set_attributes({"country": "US"})
+        assert ctx.run_experience("us-experience") is not None
+
+        # A FRESH context for the same visitor rehydrates the persisted update
+        # from the SAME injected store and now qualifies.
+        ctx2 = core.create_context("visitor-rt")
+        assert dict(ctx2.visitor_attributes) == {"country": "US"}
+        assert ctx2.run_experience("us-experience") is not None
+
+        # The persisted state is observable through the injected store under a
+        # visitor-scoped state key (not a dedup key).
+        keys = _injected_keys(in_memory_store)
+        assert any(k.startswith("state:") and "visitor-rt" in k for k in keys)
+    finally:
+        core.close()
+
+
+def test_round_trip_is_visitor_scoped(in_memory_store):
+    config = SDKConfig(data=_AUDIENCE_CONFIG, data_store=in_memory_store)
+    core = Core(config).initialize()
+    try:
+        core.create_context("v_a", visitor_attributes={"country": "CA"}).set_attributes(
+            {"country": "US"}
+        )
+        # A different visitor never persisted anything → hydrates empty and does
+        # not see v_a's update (no clobber across visitors).
+        ctx_b = core.create_context("v_b")
+        assert dict(ctx_b.visitor_attributes) == {}
+        assert ctx_b.run_experience("us-experience") is None
+    finally:
+        core.close()
