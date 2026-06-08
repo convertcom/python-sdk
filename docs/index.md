@@ -21,6 +21,7 @@ All code samples in these guides are executed against the current public API by
 | [Extending](extending.md) | The `@runtime_checkable` extension Protocols (transport, storage, event bus), how to inject your own implementations, and where the seams are. |
 | [Support workflows](support-workflows.md) | Using diagnostics and lifecycle events to triage support questions and keep parity coverage current. |
 | [Runtime integration](runtime-integration.md) | Per-runtime flush patterns (Lambda, Cloud Run, gunicorn, uvicorn, Celery, CLI). |
+| [Release process](release-process.md) | Maintainer-facing: the CI quality gates, coverage/parity release gates, dependency-bounds policy, towncrier changelog discipline, parity-fixture regeneration, and the OIDC tag-triggered PyPI publish flow. |
 
 ## Migration guides
 
