@@ -117,6 +117,27 @@ class Tracker:
         # for a Tracker constructed without one (e.g. a direct test) — emission
         # is then a guarded no-op so the tracking flow is unaffected.
         self._event_bus = event_bus
+        # Seed the queue's identity metadata from the initial snapshot so a later
+        # refresh re-point (Story 5.2) is a delta from a known baseline.
+        self._queue.update_snapshot_metadata(
+            account_id=snapshot.account_id, project_id=snapshot.project_id
+        )
+
+    # --- config refresh (Story 5.2) ----------------------------------------
+
+    def update_snapshot(self, snapshot: "ConfigSnapshot") -> None:
+        """Re-point the tracker (and its queue) at a refreshed snapshot.
+
+        Called by ``Core`` on each successful background refresh swap. The
+        serializer builds the wire envelope's ``accountId`` / ``projectId`` from
+        this snapshot, so re-pointing it attributes conversions queued after the
+        refresh to the new project (JS parity: ``ApiManager.setData()``). The
+        queue's recorded identity metadata is updated in lock-step.
+        """
+        self._snapshot = snapshot
+        self._queue.update_snapshot_metadata(
+            account_id=snapshot.account_id, project_id=snapshot.project_id
+        )
 
     # --- track -------------------------------------------------------------
 

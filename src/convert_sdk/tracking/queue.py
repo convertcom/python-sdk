@@ -83,12 +83,45 @@ class TrackingQueue:
         # Insertion-ordered per-visitor grouping (dict preserves order).
         self._items: "dict[str, VisitorQueueItem]" = {}
         self._event_count = 0
+        # Story 5.2: the queue tracks the account/project identity it is bound to
+        # so a background config refresh can re-point delivery attribution to the
+        # new project (JS parity: ApiManager.setData()). ``None`` until set by the
+        # tracker; the wire envelope is still built from the tracker's snapshot,
+        # this metadata records the latest authoritative identity after a swap.
+        self._account_id: Optional[str] = None
+        self._project_id: Optional[str] = None
 
     @property
     def length(self) -> int:
         """The total number of queued events across all visitors."""
         with self._lock:
             return self._event_count
+
+    @property
+    def account_id(self) -> Optional[str]:
+        """The account id this queue is currently bound to (post-swap identity)."""
+        with self._lock:
+            return self._account_id
+
+    @property
+    def project_id(self) -> Optional[str]:
+        """The project id this queue is currently bound to (post-swap identity)."""
+        with self._lock:
+            return self._project_id
+
+    def update_snapshot_metadata(
+        self, *, account_id: Optional[str], project_id: Optional[str]
+    ) -> None:
+        """Re-point the queue's account/project identity after a config refresh.
+
+        Mirrors the JS SDK ``ApiManager.setData()`` — when a refresh swaps in a
+        snapshot with a different project, conversions queued afterwards must be
+        attributed to the new project, not the project that was current when the
+        SDK first initialized. The latest write wins under the queue lock.
+        """
+        with self._lock:
+            self._account_id = account_id
+            self._project_id = project_id
 
     def enqueue(
         self,

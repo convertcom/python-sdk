@@ -320,8 +320,28 @@ class Core:
             config=self._config,
             transport=self._ensure_transport(),
             on_snapshot=self._apply_refreshed_snapshot,
+            on_terminal_failure=self._on_refresh_terminal_failure,
+            logger=self._config.logger,
         )
         self._refresher.start()
+
+    def _on_refresh_terminal_failure(self, error: BaseException) -> None:
+        """Surface a terminal background-refresh failure (AC-3 typed-error channel).
+
+        A persistently failing refresh keeps serving the prior good snapshot; this
+        callback records the typed Story 4.2 error through the diagnostic logger
+        so the failure is visible to operators WITHOUT crashing the host process.
+        It is invoked on the worker thread and never re-raises.
+        """
+        status = getattr(error, "status_code", None)
+        log_safe(
+            LifecycleEvent.CONFIG_UPDATED,
+            level=logging.ERROR,
+            target=self._config.logger,
+            context=SafeContext(status_code=status),
+            refresh_phase="terminal_failure",
+            error_code=getattr(error, "code", None),
+        )
 
     def _build_tracker(self) -> None:
         """Create the shared tracking orchestrator from the loaded snapshot.
@@ -389,11 +409,34 @@ class Core:
         :meth:`create_context` / :attr:`current_config` read observes either the
         whole previous or the whole new snapshot — never a partial state.
         Snapshots are immutable and replaced wholesale; one is never mutated in
-        place (Critical Warning #2). Story 5.2 Task 3 extends this seam to
-        re-point tracking metadata and emit ``CONFIG_UPDATED``.
+        place (Critical Warning #2).
+
+        After the swap it re-points the shared tracker (and its queue) so
+        conversions queued after the refresh attribute to the new project (JS
+        parity: ``ApiManager.setData()``), then emits ``CONFIG_UPDATED`` on the
+        event bus carrying the new account/project ids and entity counts (the
+        JS ``SystemEvents.CONFIG_UPDATED`` analog integrators subscribe to for
+        cache busts). Runs on the background worker thread; emission is isolated
+        by the bus so a buggy handler never crashes the worker.
         """
         with self._snapshot_lock:
             self._snapshot = snapshot
+        if self._tracker is not None:
+            self._tracker.update_snapshot(snapshot)
+        self._event_bus.emit(
+            LifecycleEvent.CONFIG_UPDATED,
+            {
+                "account_id": snapshot.account_id,
+                "project_id": snapshot.project_id,
+                "entity_counts": {
+                    "experiences": len(snapshot.experiences),
+                    "features": len(snapshot.features),
+                    "goals": len(snapshot.goals),
+                    "audiences": len(snapshot.audiences),
+                    "segments": len(snapshot.segments),
+                },
+            },
+        )
 
     def _refresher_alive(self) -> bool:
         """True while the background refresh worker thread is running (test seam)."""
