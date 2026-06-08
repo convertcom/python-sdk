@@ -1,27 +1,117 @@
-"""Privacy-safe logging helpers for the Convert Python SDK (Story 2.4).
+"""Privacy-safe logging helpers for the Convert Python SDK (Stories 2.4 + 4.1).
 
 Provides the SDK's configured stdlib :mod:`logging` logger and small, stable,
-event-oriented log call sites for delivery outcomes (architecture
-#Logging-Patterns). The phrasing is deliberately stable ("queue release",
-"tracking delivery failure") and the operational context is restricted to
-non-sensitive fields (release reason, batch size, HTTP status code, retry
-count).
+event-oriented log call sites (architecture #Logging-Patterns). The phrasing is
+deliberately stable and keyed off the :class:`~convert_sdk.events.LifecycleEvent`
+vocabulary; the operational context is restricted to the NFR6 allowlist of
+non-sensitive fields (lifecycle event name, config version, entity key, redacted
+endpoint host, HTTP status code, batch size, retry count, queue release reason,
+and a hashed/fingerprinted visitor reference).
 
-Privacy rule (NFR7/NFR23, Critical Warning #7): NO log line at any level may
-contain the SDK key, full auth headers, or raw visitor attributes. These helpers
-only ever accept and emit the safe fields above; they never receive a secret to
-begin with. The centralized redaction primitives land in Story 4.1/4.2 — this
-module must not regress that contract.
+Story 4.1 adds :func:`log_safe`, the single wrapper every SDK log call site uses.
+It routes every value through the centralized
+:mod:`convert_sdk._internal.redaction` primitives so redaction is applied
+STRUCTURALLY at record-construction time — never relying on log level or a
+downstream ``logging.Filter`` to gate sensitive data (qs-08 frozen decision).
+The Story 2.4 helpers (:func:`log_queue_release_success`,
+:func:`log_tracking_delivery_failure`, :func:`log_event_handler_error`) are
+preserved unchanged; prior suites depend on them.
+
+Privacy rule (NFR6/NFR7/NFR23): NO log line at any level may contain the SDK key,
+full auth headers, raw visitor attributes, or the raw ``visitor_id``. Credentials
+are OMITTED entirely from default output (NFR7 reconciliation); the only key
+reference that may ever appear is the :func:`~convert_sdk._internal.redaction.redact_key`
+masked shape, and even that is not routed through normal-flow logs.
+
+Layering (architecture #Module-Dependency-Layering-enforced): this module may
+import the L0 leaf ``_internal/`` utilities and the L0 ``LifecycleEvent`` enum,
+but must NOT import ``adapters/``, transport, ``evaluation/``, ``tracking/``,
+``context.py``, or ``core.py`` — logging is a low-level cross-cutting utility
+consumed by higher layers; it must not pull the composition root inward.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
+
+from convert_sdk._internal.redaction import SafeContext, redact_key, redact_url
+from convert_sdk.events import LifecycleEvent
 
 #: The SDK's package logger. Applications configure handlers/levels on the
 #: ``convert_sdk`` logger (or its parent) per standard stdlib logging.
 logger = logging.getLogger("convert_sdk")
+
+#: Kwarg names whose values are structurally redacted by :func:`log_safe` before
+#: they ever reach a log record. A raw value passed under one of these names is
+#: masked at record-construction time (defense in depth — never level-gated).
+_URL_KWARGS = frozenset({"url", "endpoint"})
+_KEY_KWARGS = frozenset({"key", "sdk_key", "auth", "authorization", "token", "secret"})
+
+
+def log_safe(
+    event: LifecycleEvent,
+    *,
+    level: int = logging.INFO,
+    target: Optional[logging.Logger] = None,
+    context: Optional[SafeContext] = None,
+    **fields: Any,
+) -> None:
+    """Emit one privacy-safe, event-oriented SDK log record.
+
+    Builds a stable record from the ``event`` name (keyed off the
+    :class:`~convert_sdk.events.LifecycleEvent` vocabulary — never a raw string
+    literal) plus an optional :class:`SafeContext` and/or already-redacted
+    ``fields`` kwargs. Every value is routed through the centralized redaction
+    primitives BEFORE the record is constructed, so the same structural
+    redaction applies at ALL levels (DEBUG is not a license to emit secrets/PII).
+
+    Args:
+        event: The lifecycle moment this record corresponds to.
+        level: The stdlib logging level (default ``INFO`` for operational
+            milestones; pass ``DEBUG`` for fine-grained diagnostics or
+            ``WARNING``/``ERROR`` for recoverable failures).
+        target: Optional caller-supplied logger (e.g. ``SDKConfig.logger``). When
+            ``None`` the package ``convert_sdk`` namespace logger is used. The SDK
+            only ever *emits* through this logger — it never configures it.
+        context: Optional allowlist-only :class:`SafeContext` of operational
+            fields. Its rendered fields are merged into the record.
+        **fields: Additional allowlisted fields. Values under URL/key-like names
+            (``url``/``endpoint`` and ``key``/``auth``/``token``/...) are
+            structurally redacted; all other values are emitted as-is and MUST
+            already be allowlist-safe (the caller is responsible for passing only
+            NFR6-approved fields — e.g. a hashed visitor reference, never a raw
+            ``visitor_id`` or attribute dict).
+    """
+    log = target if target is not None else logger
+    # Cheap level guard: skip all field assembly if the record would be dropped.
+    if not log.isEnabledFor(level):
+        return
+
+    parts = [f"event={event.value}"]
+    if context is not None:
+        for k, v in context.as_log_fields().items():
+            parts.append(f"{k}={v}")
+    for name, value in fields.items():
+        parts.append(f"{name}={_redact_field(name, value)}")
+    log.log(level, " ".join(parts))
+
+
+def _redact_field(name: str, value: Any) -> Any:
+    """Structurally redact a single ``log_safe`` field by its name.
+
+    URL/endpoint values lose their query string (and any route key segment);
+    key/secret/auth values are masked to the qs-08 shape. Everything else is
+    returned unchanged (the caller must only pass allowlisted values).
+    """
+    if value is None:
+        return value
+    lname = name.lower()
+    if lname in _URL_KWARGS:
+        return redact_url(str(value))
+    if lname in _KEY_KWARGS:
+        return redact_key(str(value))
+    return value
 
 
 def log_queue_release_success(*, reason: str, batch_size: int) -> None:
