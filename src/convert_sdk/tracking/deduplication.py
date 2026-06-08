@@ -34,23 +34,30 @@ change (Critical Warning #5, R2). No private dict bypasses the boundary.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from convert_sdk.ports.storage import DataStore
 
 # Namespacing prefix for the per-(visitor, goal) marker key. The key shape is an
 # internal DataStore detail — callers never construct it directly except via
-# :func:`goal_marker_key`.
-_MARKER_PREFIX = "goal_tracked"
+# :func:`goal_marker_key`. The ``dedup:`` namespace prevents cross-concern key
+# collisions with sticky-bucketing or other DataStore consumers.
+_MARKER_PREFIX = "dedup"
 
 
 def goal_marker_key(visitor_id: str, goal_id: str) -> str:
     """Build the DataStore key for the ``(visitor_id, goal_id)`` tracked marker.
 
-    The key is unique per visitor/goal pair so markers never collide across
-    visitors or goals.
+    F-050: uses a collision-safe namespaced key
+    ``f"dedup:{json.dumps([visitor_id, goal_id])}"``. JSON serialization of a
+    two-element list guarantees no collision regardless of separator characters
+    in the values — e.g. ``("a:b", "c")`` → ``'dedup:["a:b", "c"]'`` and
+    ``("a", "b:c")`` → ``'dedup:["a", "b:c"]'`` are guaranteed distinct, where a
+    naive ``f"{visitor_id}:{goal_id}"`` composite would collide. ``json`` is
+    stdlib — no new dependency.
     """
-    return f"{_MARKER_PREFIX}:{visitor_id}:{goal_id}"
+    return f"{_MARKER_PREFIX}:{json.dumps([visitor_id, goal_id])}"
 
 
 @dataclass(frozen=True)

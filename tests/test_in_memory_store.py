@@ -17,8 +17,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
-
 from convert_sdk import DataStore, InMemoryDataStore
 from convert_sdk.adapters.storage.in_memory import (
     InMemoryDataStore as InMemoryDataStoreDirect,
@@ -287,17 +285,21 @@ class _RecordingStore:
         self._data.pop(key, None)
 
 
+_DIRECT_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456", "key": "proj-key"},
+    "experiences": [],
+    "features": [],
+    "goals": [{"id": "g1", "key": "signup"}],
+    "audiences": [],
+    "segments": [],
+}
+
+
 def _minimal_snapshot_config(store):
     from convert_sdk.config import SDKConfig
 
-    return SDKConfig(
-        data={
-            "account_id": "1",
-            "project_id": "1",
-            "goals": [{"id": "100", "key": "signup"}],
-        },
-        data_store=store,
-    )
+    return SDKConfig(data=dict(_DIRECT_CONFIG), data_store=store)
 
 
 def test_core_uses_injected_data_store_for_dedup_markers():
@@ -310,7 +312,7 @@ def test_core_uses_injected_data_store_for_dedup_markers():
     ctx = core.create_context("visitor-1")
     ctx.track_conversion("signup")
 
-    # The dedup marker for (visitor-1, goal 100) must land in the injected store,
+    # The dedup marker for (visitor-1, goal g1) must land in the injected store,
     # proving Core/Tracker depend on the protocol, not the concrete class.
     assert any(key.startswith("dedup:") for key in stub.set_keys)
     core.close()
@@ -320,13 +322,7 @@ def test_core_defaults_to_in_memory_store_when_none():
     from convert_sdk import Core
     from convert_sdk.config import SDKConfig
 
-    config = SDKConfig(
-        data={
-            "account_id": "1",
-            "project_id": "1",
-            "goals": [{"id": "100", "key": "signup"}],
-        },
-    )
+    config = SDKConfig(data=dict(_DIRECT_CONFIG))
     assert config.data_store is None
     core = Core(config).initialize()
     # No exception, fully functional with the in-memory default.

@@ -21,10 +21,12 @@ from convert_sdk.context import Context
 from convert_sdk.domain.config_snapshot import ConfigSnapshot
 
 from convert_sdk.adapters.events.in_process import InProcessEventBus
+from convert_sdk.adapters.storage.in_memory import InMemoryDataStore
 from convert_sdk.events import LifecycleEvent
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.ports.event_bus import EventBus, EventHandler
+    from convert_sdk.ports.storage import DataStore
     from convert_sdk.ports.transport import Transport
 
 
@@ -46,6 +48,15 @@ class Core:
         self._owns_transport = False
         self._snapshot: Optional[ConfigSnapshot] = None
         self._ready = False
+        # Story 3.1: the composition root resolves and OWNS the single per-Core
+        # DataStore. A configured store (SDKConfig.data_store) is honored as-is;
+        # the default None maps to a fresh in-memory store so the SDK is fully
+        # functional with zero external storage dependency. core.py is the ONLY
+        # site allowed to import the concrete InMemoryDataStore (layering L4);
+        # everything downstream receives it as a DataStore protocol type.
+        self._data_store: "DataStore" = (
+            config.data_store if config.data_store is not None else InMemoryDataStore()
+        )
         # Story 2.3: the shared tracker (queue + dedup + flush) is created at
         # initialize() once the snapshot is available, and shared by every
         # context Core creates so dedup/batching are process-consistent.
@@ -178,6 +189,7 @@ class Core:
         self._tracker = Tracker(
             snapshot=self._snapshot,
             config=self._config,
+            data_store=self._data_store,
             transport=self._transport,
             transport_provider=self._ensure_transport,
             event_bus=self._event_bus,
