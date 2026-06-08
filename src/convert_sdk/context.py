@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
 
 from convert_sdk._internal.redaction import SafeContext, fingerprint_visitor
 from convert_sdk.domain.context_state import ContextState
@@ -41,6 +41,7 @@ from convert_sdk.domain.results import (
     GoalDiagnostic,
 )
 from convert_sdk.evaluation import entity_lookup
+from convert_sdk.evaluation.bucketing import get_bucket_value_for_visitor
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
 from convert_sdk.evaluation.segments import select_custom_segments
@@ -89,6 +90,7 @@ class Context:
         location_attributes: Optional[Mapping[str, Any]] = None,
         tracker: Optional["Tracker"] = None,
         data_store: Optional["DataStore"] = None,
+        environment: Optional[str] = None,
     ) -> None:
         # Visitor identity + stored attributes + default segments + snapshot
         # linkage live in the typed ContextState (visitor state stays separate
@@ -113,6 +115,13 @@ class Context:
         self._location_attributes: Mapping[str, Any] = MappingProxyType(
             dict(location_attributes or {})
         )
+        # Story 4.3: the SDK config environment (or None for a directly
+        # constructed context). It is an allowlist-safe operational field
+        # (NFR6) included in the cross-SDK-comparable diagnostic field set so
+        # diagnostics captured in a mixed Python/JS deployment carry the same
+        # environment qualifier. Optional + defaulting to None keeps the
+        # constructor backward compatible (Critical Warning #1).
+        self._environment = environment
 
     @property
     def visitor_id(self) -> str:
@@ -335,23 +344,45 @@ class Context:
             outcome=result.status.value,
         )
 
-    def _log_diagnostic(self, entity_key: Optional[str], reason: DiagnosticReason) -> None:
+    def _log_diagnostic(
+        self,
+        entity_key: Optional[str],
+        reason: DiagnosticReason,
+        *,
+        environment: Optional[str] = None,
+        bucket_value: Optional[int] = None,
+        variation_key: Optional[str] = None,
+    ) -> None:
         """Emit an additive, allowlist-only diagnostic-outcome log record (FR52).
 
         Routes through the SAME Story 4.1 :func:`log_safe` seam every other SDK
         log call site uses (no separate diagnostics module) so support teams see
         the identical closed ``reason`` code in logs and in the returned typed
-        diagnostic. Carries ONLY the entity key, the reason code, and a HASHED
-        visitor reference — never the raw ``visitor_id``, visitor attributes, or
-        any PII (NFR6/NFR51, Critical Warning #3). Observational only — it runs
-        after the diagnostic outcome is already determined and cannot change it.
+        diagnostic. Story 4.3 mirrors the partial cross-SDK-comparable field set
+        (``reason``, ``environment``, ``bucket_value``, ``variation_key``, and a
+        HASHED visitor reference) into the log record so a mixed Python/JS
+        deployment can correlate diagnostic output for the same scenario. It
+        carries ONLY allowlist-safe fields — never the raw ``visitor_id``,
+        visitor attributes, or any PII (NFR6/NFR51, Critical Warning #3).
+        Observational only — it runs after the diagnostic outcome is already
+        determined and cannot change it.
         """
+        # Only emit allowlist-safe fields that are present (omit None) so the
+        # record stays compact and the partial field set is honest about misses.
+        optional: Dict[str, Any] = {}
+        if environment is not None:
+            optional["environment"] = environment
+        if bucket_value is not None:
+            optional["bucket_value"] = bucket_value
+        if variation_key is not None:
+            optional["variation_key"] = variation_key
         log_safe(
             LifecycleEvent.DIAGNOSTIC,
             level=logging.DEBUG,
             context=SafeContext(entity_key=entity_key),
             visitor=fingerprint_visitor(self._state.visitor_id),
             reason=reason.value,
+            **optional,
         )
 
     # --- evaluation surface ------------------------------------------------
@@ -689,12 +720,23 @@ class Context:
             location_attributes=location,
         )
         if result is not None:
+            # Story 4.3: recompute the deterministic bucket value for the
+            # resolved experience so the diagnostic carries the cross-SDK
+            # comparable bucketing outcome. This mirrors the value
+            # ``select_experience`` used internally (same visitor + experience
+            # id → same value against the same snapshot) without changing the
+            # frozen ``ExperienceResult`` public shape.
+            bucket_value = get_bucket_value_for_visitor(
+                self._state.visitor_id, experience_id=result.experience_id
+            )
             return self._diagnose(
                 ExperienceDiagnostic,
                 experience_key,
                 DiagnosticReason.RESOLVED,
                 "experience resolved to a variation",
                 {"experience_key": experience_key, "variation_key": result.variation_key},
+                bucket_value=bucket_value,
+                variation_key=result.variation_key,
             )
         # The experience exists but produced no result: the visitor did not
         # qualify for (or bucket within) it — surfaced as an audience mismatch.
@@ -824,6 +866,9 @@ class Context:
         reason: DiagnosticReason,
         message: str,
         details: Mapping[str, Any],
+        *,
+        bucket_value: Optional[int] = None,
+        variation_key: Optional[str] = None,
     ) -> Any:
         """Build a typed diagnostic and mirror miss-path reasons to the log seam.
 
@@ -831,8 +876,42 @@ class Context:
         allowlist-only, hashed-visitor diagnostic record through Story 4.1's
         :func:`log_safe`. A ``RESOLVED`` outcome is not a miss, so it is not
         logged (parity with the observational bucketing/conversion logs).
+
+        Story 4.3: the typed diagnostic's read-only ``details`` mapping (Story
+        4.2's frozen surface — NOT new top-level fields) is augmented with the
+        partial cross-SDK-comparable field set so a mixed Python/JS deployment
+        can compare diagnostic output for the same visitor scenario:
+
+        * ``reason`` — the closed :class:`DiagnosticReason` code value.
+        * ``environment`` — the SDK config environment (``None`` when unwired).
+        * ``visitor_ref`` — the HASHED visitor reference via
+          :func:`~convert_sdk._internal.redaction.fingerprint_visitor`; the raw
+          ``visitor_id`` NEVER appears (NFR6/NFR51, Critical Warning #1).
+        * ``bucket_value`` / ``variation_key`` — present only on a resolved
+          experience diagnostic (the only path that buckets); ``None`` otherwise.
+
+        The AC-1 fields ``config_version``, ``bucketing_inputs`` (key/traffic/
+        seed/salt), and ``experience_key`` completion are intentionally DEFERRED
+        to Story 4.5 and are NOT emitted here. The formal byte-comparable
+        contract document is owned by Story 4.5; the parity-comparison helper +
+        diagnostic-vector fixtures are owned by Story 5.1.
         """
-        diagnostic = cls(reason=reason, message=message, details=details)
+        # Merge the comparable field set onto the caller's allowlist-safe
+        # details WITHOUT mutating the caller's mapping. The _Diagnostic
+        # dataclass re-wraps this read-only in __post_init__.
+        comparable: Dict[str, Any] = dict(details)
+        comparable["reason"] = reason.value
+        comparable["environment"] = self._environment
+        comparable["visitor_ref"] = fingerprint_visitor(self._state.visitor_id)
+        comparable["bucket_value"] = bucket_value
+        comparable["variation_key"] = variation_key
+        diagnostic = cls(reason=reason, message=message, details=comparable)
         if reason is not DiagnosticReason.RESOLVED:
-            self._log_diagnostic(entity_key, reason)
+            self._log_diagnostic(
+                entity_key,
+                reason,
+                environment=self._environment,
+                bucket_value=bucket_value,
+                variation_key=variation_key,
+            )
         return diagnostic
