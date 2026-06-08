@@ -76,7 +76,12 @@ def setup_periodic_flush(
     """
     if interval_ms is None:
         return None
-    flusher = PeriodicFlusher(flushable.flush, interval_ms)
+    # Prefer a trigger-specific timeout release entry point when the flushable
+    # exposes one (Story 2.4: so the periodic release reports
+    # ``ReleaseReason.TIMEOUT`` on its ``API_QUEUE_RELEASED`` event). Fall back
+    # to the generic ``flush()`` for any plain :class:`Flushable`.
+    callback = getattr(flushable, "flush_timeout", flushable.flush)
+    flusher = PeriodicFlusher(callback, interval_ms)
     flusher.start()
     return flusher
 

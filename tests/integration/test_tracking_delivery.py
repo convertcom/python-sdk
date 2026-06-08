@@ -98,39 +98,162 @@ def test_multiple_visitors_delivered_in_one_batch(
     assert {v["visitorId"] for v in body["visitors"]} == {"v1", "v2"}
 
 
-def test_failed_delivery_preserves_queue_for_retry(
-    respx_mock, mock_config_endpoint
+def test_failed_delivery_surfaces_via_event_drops_events_and_does_not_raise(
+    respx_mock, mock_config_endpoint, caplog
 ):
+    """Story 2.4 (F-010) delivery-failure contract.
+
+    A failing flush emits ``API_QUEUE_RELEASED`` with the delivery error, logs a
+    privacy-safe failure line, DROPS the events (does NOT re-queue), and does NOT
+    raise out of ``flush()``. This intentionally supersedes the Story 2.3
+    preserve-and-raise behavior (architecture #Retry-and-Backoff-Formula).
+    """
+    import logging
+
     import httpx
 
     from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
     from convert_sdk.config import SDKConfig, TransportConfig
     from convert_sdk.core import Core
-    from convert_sdk.errors import TrackingDeliveryError
+    from convert_sdk.events import LifecycleEvent, QueueReleasedPayload
 
     from .conftest import MOCK_BASE_URL
 
-    # First POST fails (502), second succeeds (200) — RESPX side effect chain.
+    # Both POSTs fail (503) — there is no tracking-layer retry; the transport
+    # adapter raises TrackingDeliveryError and the release path drops the events.
     route = respx_mock.post(f"/track/{SDK_KEY}").mock(
-        side_effect=[
-            httpx.Response(502, text="bad gateway"),
-            httpx.Response(200, json={"status": "ok"}),
-        ]
+        return_value=httpx.Response(503, text="unavailable")
     )
     transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
     core = Core(
         SDKConfig(sdk_key=SDK_KEY, transport=TransportConfig(base_url=MOCK_BASE_URL)),
         transport=transport,
     ).initialize()
+    released = []
+    core.on(
+        LifecycleEvent.API_QUEUE_RELEASED,
+        lambda payload, error=None: released.append((payload, error)),
+    )
     try:
         core.create_context("v1").track_conversion("purchase_completed")
-        # First flush surfaces the delivery error (no retry in tracking layer).
-        try:
+        with caplog.at_level(logging.ERROR, logger="convert_sdk"):
+            # Must NOT raise (Critical Warning #3).
             core.flush()
-        except TrackingDeliveryError:
-            pass
-        # The event was preserved; an explicit retry now succeeds.
+
+        # Exactly one failure outcome emitted.
+        assert len(released) == 1
+        payload, error = released[0]
+        assert isinstance(payload, QueueReleasedPayload)
+        assert payload.reason.value == "explicit"
+        assert payload.batch_size == 1
+        assert payload.event_count == 1
+        assert payload.visitor_count == 1
+        assert payload.status_code == 503
+        assert error is not None
+
+        # Privacy-safe failure log (NFR23): batch size + status present.
+        failure_logs = [r for r in caplog.records if "tracking delivery failure" in r.message]
+        assert failure_logs, "expected a privacy-safe delivery-failure log line"
+
+        # Events were DROPPED, not re-queued: a later (still-failing) flush emits
+        # nothing more because the queue is empty.
+        first_calls = route.call_count
         core.flush()
-        assert route.call_count == 2
+        assert route.call_count == first_calls  # no second delivery attempt
+        assert len(released) == 1
+    finally:
+        core.close()
+
+
+def test_successful_flush_emits_queue_released_with_reason_and_counts(
+    sdk_with_mock_transport, mock_tracking_endpoint
+):
+    from convert_sdk.events import LifecycleEvent, QueueReleasedPayload
+
+    core = sdk_with_mock_transport
+    released = []
+    core.on(
+        LifecycleEvent.API_QUEUE_RELEASED,
+        lambda payload, error=None: released.append((payload, error)),
+    )
+    core.create_context("v1").track_conversion("purchase_completed")
+    core.create_context("v2").track_conversion("signup")
+    core.flush()
+
+    assert mock_tracking_endpoint.call_count == 1
+    assert len(released) == 1
+    payload, error = released[0]
+    assert error is None
+    assert isinstance(payload, QueueReleasedPayload)
+    assert payload.reason.value == "explicit"
+    assert payload.batch_size == 2
+    assert payload.event_count == 2
+    assert payload.visitor_count == 2
+    # Success payload carries no failure diagnostic context.
+    assert payload.status_code is None
+
+
+def test_empty_flush_emits_no_queue_released(
+    sdk_with_mock_transport, mock_tracking_endpoint
+):
+    from convert_sdk.events import LifecycleEvent
+
+    core = sdk_with_mock_transport
+    released = []
+    core.on(LifecycleEvent.API_QUEUE_RELEASED, lambda payload, error=None: released.append(payload))
+    # Nothing tracked -> empty-queue flush is a no-op (no release occurred).
+    core.flush()
+    assert mock_tracking_endpoint.call_count == 0
+    assert released == []
+
+
+def test_failure_event_and_log_contain_no_secrets_or_pii(
+    respx_mock, mock_config_endpoint, caplog
+):
+    """NFR23/NFR7: the failure payload + failure log carry only batch_size,
+    status code, and retry count — never the SDK key, auth header, or raw
+    visitor attributes."""
+    import logging
+
+    import httpx
+
+    from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
+    from convert_sdk.config import SDKConfig, TransportConfig
+    from convert_sdk.core import Core
+    from convert_sdk.events import LifecycleEvent
+
+    from .conftest import MOCK_BASE_URL
+
+    respx_mock.post(f"/track/{SDK_KEY}").mock(return_value=httpx.Response(500))
+    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    core = Core(
+        SDKConfig(sdk_key=SDK_KEY, transport=TransportConfig(base_url=MOCK_BASE_URL)),
+        transport=transport,
+    ).initialize()
+    captured = []
+    core.on(
+        LifecycleEvent.API_QUEUE_RELEASED,
+        lambda payload, error=None: captured.append((payload, error)),
+    )
+    try:
+        core.create_context("secret-visitor").track_conversion(
+            "purchase_completed",
+            conversion_data={"plan": "enterprise"},
+        )
+        with caplog.at_level(logging.ERROR, logger="convert_sdk"):
+            core.flush()
+
+        payload, error = captured[0]
+        # The payload surface exposes only safe diagnostic fields.
+        assert payload.status_code == 500
+        assert payload.batch_size == 1
+        assert not hasattr(payload, "sdk_key")
+        assert not hasattr(payload, "visitor_attributes")
+        # No log line leaks the SDK key, the bearer header value, or raw
+        # conversion attributes.
+        joined = " ".join(r.getMessage() for r in caplog.records)
+        assert SDK_KEY not in joined
+        assert "Bearer" not in joined
+        assert "enterprise" not in joined
     finally:
         core.close()

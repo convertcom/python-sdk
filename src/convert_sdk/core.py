@@ -20,7 +20,11 @@ from convert_sdk.config_loader import load_snapshot
 from convert_sdk.context import Context
 from convert_sdk.domain.config_snapshot import ConfigSnapshot
 
+from convert_sdk.adapters.events.in_process import InProcessEventBus
+from convert_sdk.events import LifecycleEvent
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from convert_sdk.ports.event_bus import EventBus, EventHandler
     from convert_sdk.ports.transport import Transport
 
 
@@ -48,6 +52,25 @@ class Core:
         self._tracker: Optional[Any] = None
         # Opt-in daemonic periodic-flush driver (None unless configured).
         self._periodic_flusher: Optional[Any] = None
+        # Story 2.4: ONE EventBus per Core, created eagerly so Core.on(...) is
+        # usable before initialize() and the SAME bus is injected into the
+        # tracker at initialize() (no per-context or per-call bus).
+        self._event_bus: "EventBus" = InProcessEventBus()
+
+    # --- lifecycle events --------------------------------------------------
+
+    def on(self, event: LifecycleEvent, handler: "EventHandler") -> None:
+        """Register a lifecycle-event ``handler`` for ``event`` (Story 2.4, FR40).
+
+        The only public observability surface added by Story 2.4. Delegates to
+        the single per-Core :class:`~convert_sdk.ports.event_bus.EventBus`; Core
+        itself stays thin (no event-routing logic here). A handler that raises is
+        isolated, logged, and swallowed by the bus — it can never break tracking
+        or delivery (AC #2). Handlers are invoked as ``handler(payload, error)``.
+
+        Safe to call before :meth:`initialize`.
+        """
+        self._event_bus.on(event, handler)
 
     # --- readiness & config access ----------------------------------------
 
@@ -157,6 +180,7 @@ class Core:
             config=self._config,
             transport=self._transport,
             transport_provider=self._ensure_transport,
+            event_bus=self._event_bus,
         )
         # Opt-in periodic flush (daemonic timer) when configured; default
         # (interval None) keeps the lifecycle explicit-flush-only.

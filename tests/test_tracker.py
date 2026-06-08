@@ -116,20 +116,27 @@ def test_batch_size_release_funnels_through_shared_path():
     assert len(transport.calls) == 1
 
 
-def test_failed_delivery_restores_queue():
+def test_failed_delivery_does_not_raise_and_drops_events():
+    """Story 2.4 (F-010) changed the failure contract from Story 2.3.
+
+    On a ``TrackingDeliveryError`` the shared release path now surfaces the
+    outcome via the lifecycle event + privacy-safe log, DROPS the drained events
+    (does NOT re-queue — intentional Python divergence from the JS catch branch),
+    and returns WITHOUT raising so ``flush()`` stays non-raising. A subsequent
+    flush therefore has nothing left to deliver.
+    """
     transport = FakeTransport()
     transport.fail = True
     tracker = _tracker(transport)
     tracker.track(visitor_id="v1", goal_key="purchase_completed")
-    # Flush should surface the delivery error; the queue must not be silently lost.
-    try:
-        tracker.flush()
-    except Exception:
-        pass
+    # flush() must not raise on a delivery failure (Critical Warning #3).
+    tracker.flush()
+    assert transport.calls == []  # failed delivery captured nothing
+    # Events were dropped, not re-queued: a later (now-succeeding) flush is a
+    # no-op because the queue is empty.
     transport.fail = False
     tracker.flush()
-    # The originally-queued event was preserved and delivered on retry.
-    assert len(transport.calls) == 1
+    assert len(transport.calls) == 0
 
 
 def test_track_returns_dedup_outcome():

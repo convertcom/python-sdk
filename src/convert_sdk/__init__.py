@@ -34,6 +34,7 @@ from convert_sdk.errors import (
     TrackingDeliveryError,
     TransportError,
 )
+from convert_sdk.events import LifecycleEvent
 from convert_sdk.version import __version__
 
 __all__ = [
@@ -60,4 +61,7 @@ __all__ = [
     # Conversion tracking foundation (Story 2.1).
     "ConversionResult",
     "ConversionStatus",
+    # Lifecycle events public surface (Story 2.4): consumers need this enum to
+    # call Core.on(LifecycleEvent.API_QUEUE_RELEASED, ...).
+    "LifecycleEvent",
 ]
