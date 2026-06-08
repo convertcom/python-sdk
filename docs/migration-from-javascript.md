@@ -19,6 +19,8 @@ differences so you do not fight the grain of the language.
 | `runCustomSegments(...)` | `context.run_custom_segments(keys, rule_data=...)` | Returns a typed `CustomSegmentsResult`. |
 | queue control / `onQueueRelease` | `core.flush()` + `Core.on(LifecycleEvent.API_QUEUE_RELEASED, ...)` | Same enqueue-then-release model. |
 | lifecycle events | `LifecycleEvent` + `Core.on(event, handler)` | Handlers receive `(payload, error=None)`. |
+| `dataRefreshInterval` (ms, **default-on**) | `SDKConfig(refresh=RefreshConfig(interval_seconds=...))` (s, **opt-in**) | Unit and default differ — see "Background config refresh" below. |
+| `SystemEvents.CONFIG_UPDATED` (`'config.updated'`) | `LifecycleEvent.CONFIG_UPDATED` | Same wire string; fires on each successful refresh swap. |
 
 ## The same model in Python
 
@@ -74,6 +76,41 @@ These are intentional — embrace them rather than emulating JS idioms:
   `SDKConfig(data_store=...)`. See [Extending](extending.md).
 - **Normal misses return `None` / empty typed results, never exceptions.** Same
   as the JS "no result" semantics, expressed as `Optional[...]` returns.
+
+## Background config refresh
+
+The JS SDK refreshes config in the background **by default**, controlled by
+`dataRefreshInterval` expressed in **milliseconds**. The Python SDK keeps
+automatic refresh **opt-in** (post-MVP, FR31) so MVP behavior is byte-for-byte
+unchanged for users who do not ask for it. Two divergences to internalize when
+you migrate:
+
+- **Unit:** JS `dataRefreshInterval: 300000` (ms) maps to
+  `RefreshConfig(interval_seconds=300.0)` (seconds).
+- **Default:** JS refresh is on by default; Python refresh is **off** unless you
+  pass a `RefreshConfig`. Omitting it (`refresh=None`) means no daemon thread.
+
+```python
+# JS:  const sdk = new ConvertSDK({ sdkKey, dataRefreshInterval: 300000 });
+#      sdk.on('config.updated', () => cache.clear());
+from convert_sdk import Core, LifecycleEvent, RefreshConfig, SDKConfig, TransportConfig
+
+core = Core(
+    SDKConfig(
+        sdk_key="your-sdk-key-here",
+        transport=TransportConfig(base_url="https://cdn-4.convertexperiments.com"),
+        refresh=RefreshConfig(interval_seconds=300.0),  # 300000 ms -> 300 s
+    )
+)
+core.on(LifecycleEvent.CONFIG_UPDATED, lambda payload, _err: cache.clear())
+core.initialize()
+```
+
+The Python `'config.updated'` payload carries `account_id`, `project_id`, and
+`entity_counts` — the same cache-bust signal JS users subscribe to. See
+[Initialization → Automatic config refresh](initialization.md#automatic-config-refresh-opt-in)
+for failure handling, the daemon-thread / fork model, and the long-lived
+`Context` semantics.
 
 ## Evidence of behavioral equivalence
 
