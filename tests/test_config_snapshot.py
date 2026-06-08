@@ -101,6 +101,42 @@ def test_snapshot_precomputes_goal_key_index():
     assert snap.get_goal_by_key("does-not-exist") is None
 
 
+def test_snapshot_precomputes_goal_id_index():
+    """Story 3.4 (SDK-1): goals indexed by id at construction so the by-id
+    entity-lookup surface can resolve a goal by its id in O(1)."""
+    snap = load_snapshot(MINIMAL_CONFIG)
+    goal = snap.get_goal_by_id("g1")
+    assert goal is not None
+    assert goal["key"] == "goal-one"
+    assert snap.get_goal_by_id("does-not-exist") is None
+
+
+def test_snapshot_precomputes_segment_key_and_id_indexes():
+    """Story 3.4 (SDK-1): segments indexed by key AND id at construction so the
+    entity-lookup surface can resolve segments by either identity in O(1)."""
+    snap = load_snapshot(MINIMAL_CONFIG)
+    by_key = snap.get_segment_by_key("seg-one")
+    assert by_key is not None
+    assert by_key["id"] == "s1"
+    by_id = snap.get_segment_by_id("s1")
+    assert by_id is not None
+    assert by_id["key"] == "seg-one"
+    # Unknown identity returns None (read accessor, never raises).
+    assert snap.get_segment_by_key("missing") is None
+    assert snap.get_segment_by_id("missing") is None
+
+
+def test_snapshot_index_accessors_are_read_only_mappings():
+    """The new goal/segment indexes are immutable MappingProxyType, built once
+    at construction (no per-lookup rebuild, no parallel mutable index)."""
+    from types import MappingProxyType
+
+    snap = load_snapshot(MINIMAL_CONFIG)
+    assert isinstance(snap._goals_by_id, MappingProxyType)
+    assert isinstance(snap._segments_by_key, MappingProxyType)
+    assert isinstance(snap._segments_by_id, MappingProxyType)
+
+
 def test_snapshot_is_immutable():
     snap = load_snapshot(MINIMAL_CONFIG)
     # Frozen dataclass — assigning an attribute must fail.
