@@ -113,3 +113,133 @@ def test_missing_audience_definition_does_not_qualify_restricted_experience():
     exp = {"id": "e1", "key": "exp", "audiences": ["ghost"], "variations": []}
     snap = _snapshot(experiences=[exp])
     assert qualifies(exp, snap, visitor_attributes={"country": "US"}) is False
+
+
+# --- isIn operator -----------------------------------------------------------
+
+
+def test_is_in_number_same_value_hit():
+    """isIn(23, 23) -> True (PHP test case: testIsInReturnsTrueForSameNumber)."""
+    rule = _rule("isIn", "score", 23)
+    assert is_rule_matched({"score": "23"}, rule) is True
+
+
+def test_is_in_pipe_delimited_string_hit():
+    """isIn('a', 'a|b|c|d|e') -> True (PHP testIsInReturnsTrueForDelimitedString)."""
+    rule = _rule("isIn", "tier", "a|b|c|d|e")
+    assert is_rule_matched({"tier": "a"}, rule) is True
+
+
+def test_is_in_pipe_delimited_string_negated_false():
+    """isIn('a', 'a|b|c|d|e', negated=True) -> False."""
+    rule = _rule("isIn", "tier", "a|b|c|d|e", negated=True)
+    assert is_rule_matched({"tier": "a"}, rule) is False
+
+
+def test_is_in_multi_value_pipe_delimited_hit():
+    """Visitor value 'a|c' split by '|': 'a' is in 'a|b|c|d|e' -> True."""
+    rule = _rule("isIn", "tier", "a|b|c|d|e")
+    assert is_rule_matched({"tier": "a|c"}, rule) is True
+
+
+def test_is_in_against_list_miss():
+    """isIn('orange', ['ab', 'cd', 'ef']) -> False."""
+    rule = _rule("isIn", "code", ["ab", "cd", "ef"])
+    assert is_rule_matched({"code": "orange"}, rule) is False
+
+
+def test_is_in_against_list_negated_hit():
+    """isIn('orange', ['ab', 'cd', 'ef'], negated=True) -> True."""
+    rule = _rule("isIn", "code", ["ab", "cd", "ef"], negated=True)
+    assert is_rule_matched({"code": "orange"}, rule) is True
+
+
+def test_is_in_multi_value_against_list_hit():
+    """isIn('ab|ef', ['ab', 'cd', 'ef']) -> True ('ab' found in list)."""
+    rule = _rule("isIn", "code", ["ab", "cd", "ef"])
+    assert is_rule_matched({"code": "ab|ef"}, rule) is True
+
+
+def test_is_in_empty_value_against_empty_list_miss():
+    """isIn('', []) -> False (empty list, '' vs [] -> no match)."""
+    rule = _rule("isIn", "code", [])
+    assert is_rule_matched({"code": ""}, rule) is False
+
+
+def test_is_in_number_in_list_hit():
+    """isIn(456, [123, 456, 789]) -> True (number coerced to string)."""
+    rule = _rule("isIn", "score", [123, 456, 789])
+    assert is_rule_matched({"score": "456"}, rule) is True
+
+
+def test_is_in_missing_key_returns_false():
+    """Missing key -> False (operator needs a value)."""
+    rule = _rule("isIn", "plan", "free|pro|enterprise")
+    assert is_rule_matched({}, rule) is False
+    assert is_rule_matched(None, rule) is False
+
+
+# --- regexMatches operator ---------------------------------------------------
+
+
+def test_regex_matches_word_characters_hit():
+    """regexMatches('orange', '\\w+') -> True."""
+    rule = _rule("regexMatches", "label", r"\w+")
+    assert is_rule_matched({"label": "orange"}, rule) is True
+
+
+def test_regex_matches_word_characters_with_exclamation():
+    """regexMatches('An APPle!', '\\w+') -> True (word chars present)."""
+    rule = _rule("regexMatches", "label", r"\w+")
+    assert is_rule_matched({"label": "An APPle!"}, rule) is True
+
+
+def test_regex_matches_digits_hit():
+    """regexMatches(111222333, '\\d+') -> True."""
+    rule = _rule("regexMatches", "code", r"\d+")
+    assert is_rule_matched({"code": "111222333"}, rule) is True
+
+
+def test_regex_matches_digits_negated_false():
+    """regexMatches(111222333, '\\d+', negated=True) -> False."""
+    rule = _rule("regexMatches", "code", r"\d+", negated=True)
+    assert is_rule_matched({"code": "111222333"}, rule) is False
+
+
+def test_regex_matches_email_valid():
+    """regexMatches valid email against email pattern -> True."""
+    pattern = r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$"
+    rule = _rule("regexMatches", "email", pattern)
+    assert is_rule_matched({"email": "test@email.com"}, rule) is True
+
+
+def test_regex_matches_complex_email_valid():
+    """regexMatches complex email address against email pattern -> True."""
+    pattern = r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$"
+    rule = _rule("regexMatches", "email", pattern)
+    assert is_rule_matched({"email": "more.complex.e-mail123@subdomain.email.com"}, rule) is True
+
+
+def test_regex_matches_not_an_email_miss():
+    """regexMatches 'Not an email' against email pattern -> False."""
+    pattern = r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$"
+    rule = _rule("regexMatches", "email", pattern)
+    assert is_rule_matched({"email": "Not an email"}, rule) is False
+
+
+def test_regex_matches_invalid_pattern_returns_false_not_exception():
+    """Invalid regex pattern must return False, never raise."""
+    rule = _rule("regexMatches", "path", "/?wwww[invalid")
+    assert is_rule_matched({"path": "/?wwww"}, rule) is False
+
+
+def test_regex_matches_missing_key_returns_false():
+    """Missing key -> False."""
+    rule = _rule("regexMatches", "label", r"\w+")
+    assert is_rule_matched({}, rule) is False
+
+
+def test_regex_matches_case_insensitive():
+    """regexMatches is case-insensitive (value is lowercased, regex has IGNORECASE)."""
+    rule = _rule("regexMatches", "brand", "^CONVERT")
+    assert is_rule_matched({"brand": "Convert Experiences"}, rule) is True
