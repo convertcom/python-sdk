@@ -1,19 +1,26 @@
 """httpx-backed transport adapter for the Convert Python SDK (Story 1.2).
 
-Fetches the raw config payload from ``GET /config/{sdkKey}`` over HTTPS using a
-long-lived :class:`httpx.Client`. The query string follows JS SDK parity
-(``javascript-sdk/packages/api/src/api-manager.ts`` ``getConfig()``):
+Fetches the raw config payload from ``GET /api/v1/config/{sdkKey}`` over HTTPS
+using a long-lived :class:`httpx.Client`. The full endpoint is the combination
+of ``TransportConfig.base_url`` (a pure host, e.g.
+``https://cdn-4.convertexperiments.com``) and the route ``/api/v1/config/{sdkKey}``
+built by :meth:`HttpxTransport._build_route`. The ``/api/v1`` prefix is confirmed
+by the real Convert config-serving CDN and matches the PHP SDK's generated client
+(``ProjectConfigApi``, server base ``https://cdn-4.convertexperiments.com/api/v1``,
+resource path ``/config/{sdkKey}``).
 
-* ``environment={environment}`` is appended only when a non-default environment
+Two optional query parameters are appended conditionally:
+
+* ``environment={environment}`` — present only when a non-default environment
   is configured.
-* ``_conv_low_cache=1`` is appended only when the cache level is ``"low"``.
+* ``_conv_low_cache=1`` — present only when the cache level is ``"low"``.
 
-The JS implementation concatenates the two parameters without a separator
-(producing ``?environment=prod_conv_low_cache=1``). This adapter preserves the
-*intent* (both parameters present, conditionally) while emitting a well-formed,
-parseable query string (parameters joined with ``&``) — see the Story 1.2
-readiness note. Tests assert presence/absence of each parameter, not the
-malformed concatenation.
+These parameters mirror the query shape used by the JS SDK. The JS implementation
+concatenates the two parameters without a separator (producing
+``?environment=prod_conv_low_cache=1``). This adapter preserves the *intent*
+(both parameters present, conditionally) while emitting a well-formed, parseable
+query string (parameters joined with ``&``) — see the Story 1.2 readiness note.
+Tests assert presence/absence of each parameter, not the malformed concatenation.
 
 TLS-only transport (NFR8) is enforced upstream at
 :class:`~convert_sdk.config.TransportConfig` construction; an insecure base URL
@@ -74,7 +81,7 @@ class HttpxTransport:
     @staticmethod
     def _build_route(config: SDKConfig) -> str:
         query = HttpxTransport._build_query(config)
-        route = f"/config/{config.sdk_key}"
+        route = f"/api/v1/config/{config.sdk_key}"
         return f"{route}?{query}" if query else route
 
     # --- transport port ----------------------------------------------------

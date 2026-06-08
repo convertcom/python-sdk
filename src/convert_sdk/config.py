@@ -26,8 +26,10 @@ from urllib.parse import urlsplit
 
 from convert_sdk.errors import InvalidConfigError, TransportError
 
-# JS parity: the FullStack config-serving host. The route ``/config/{sdkKey}``
-# is appended by the transport adapter (Story 1.2 / SDK-3).
+# The production Convert config-serving CDN host. The transport adapter appends
+# the full route ``/api/v1/config/{sdkKey}`` (Story 1.2 / SDK-3), so this value
+# must remain a pure host with no path component. The staging counterpart is
+# ``https://cdn-4-staging.convertexperiments.com`` (same path convention).
 DEFAULT_CONFIG_BASE_URL = "https://cdn-4.convertexperiments.com"
 
 #: Cache levels mirrored from the JS SDK. ``"low"`` appends ``_conv_low_cache=1``

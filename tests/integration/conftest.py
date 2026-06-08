@@ -13,7 +13,7 @@ integration tests focus on behavior assertions, not setup. Per qs-06
 Frozen fixture names this harness exposes (qs-06 Code-Map / Tasks):
 
 * ``mock_config_endpoint`` — RESPX route returning a 200 config JSON body for
-  ``GET /config/{sdkKey}``.
+  ``GET /api/v1/config/{sdkKey}``.
 * ``mock_tracking_endpoint`` — RESPX route capturing ``POST /track/{sdkKey}``
   tracking deliveries (returns 200; the route object records calls).
 * ``sdk_with_mock_transport`` — an initialized :class:`~convert_sdk.core.Core`
@@ -76,11 +76,11 @@ def respx_mock():
 
 @pytest.fixture
 def mock_config_endpoint(respx_mock, minimal_config):
-    """Route ``GET /config/{sdkKey}`` to a 200 config JSON body.
+    """Route ``GET /api/v1/config/{sdkKey}`` to a 200 config JSON body.
 
     Returns the RESPX route so a test can assert on calls or override the body.
     """
-    route = respx_mock.get(f"/config/{SDK_KEY}").mock(
+    route = respx_mock.get(f"/api/v1/config/{SDK_KEY}").mock(
         return_value=httpx.Response(200, json=minimal_config)
     )
     return route
