@@ -19,6 +19,7 @@ network I/O is possible (AC #4).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional
 from urllib.parse import urlsplit
@@ -98,6 +99,13 @@ class SDKConfig:
             default. ``enrichData`` is computed as ``data_store is None`` at
             serialization time (Story 2.2 F-002). Story 3.1 owns the full
             persistence boundary; this is the minimal hook dedup needs.
+        logger: Optional caller-supplied :class:`logging.Logger` the SDK's
+            diagnostic-logging layer emits through (Story 4.1). ``None`` (the
+            default) means the SDK uses the package ``convert_sdk`` namespace
+            logger (``logging.getLogger("convert_sdk")``). The SDK only ever
+            *gets/uses* this logger — it NEVER calls ``logging.basicConfig()``,
+            adds handlers, or sets the level (library logging discipline); the
+            application owns handler/level configuration.
     """
 
     sdk_key: Optional[str] = None
@@ -108,6 +116,7 @@ class SDKConfig:
     batch_size: int = 10
     auto_flush_interval_ms: Optional[int] = None
     data_store: Optional[Any] = None
+    logger: Optional[logging.Logger] = None
 
     def __post_init__(self) -> None:
         has_key = self.sdk_key is not None

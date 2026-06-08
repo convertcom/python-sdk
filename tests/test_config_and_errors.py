@@ -81,6 +81,28 @@ def test_sdkconfig_supports_environment_and_cache_level():
     assert cfg.cache_level == "low"
 
 
+def test_sdkconfig_logger_defaults_to_none():
+    """Story 4.1: SDKConfig exposes an additive optional ``logger`` hook.
+
+    The default is ``None`` — the logging layer then resolves the package
+    ``convert_sdk`` namespace logger. Adding the field must not change any
+    existing construction behavior (Critical Warning #6 — additive only)."""
+    from convert_sdk import SDKConfig
+
+    cfg = SDKConfig(sdk_key="k")
+    assert cfg.logger is None
+
+
+def test_sdkconfig_accepts_caller_supplied_logger():
+    import logging
+
+    from convert_sdk import SDKConfig
+
+    custom = logging.getLogger("my.app.convert")
+    cfg = SDKConfig(sdk_key="k", logger=custom)
+    assert cfg.logger is custom
+
+
 def test_transportconfig_defaults_to_https_endpoint():
     from convert_sdk import TransportConfig
 
