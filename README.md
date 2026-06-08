@@ -218,6 +218,22 @@ They share a small sample config (`examples/_sample_config.py`) and read any
 `sdk_key` from the `CONVERT_SDK_KEY` environment variable rather than embedding
 credentials.
 
+## Documentation
+
+The advanced guides live under [`docs/`](docs/index.md) — start at the
+[documentation index](docs/index.md). Highlights:
+
+- **Topic guides:** [Initialization](docs/initialization.md),
+  [Evaluation](docs/evaluation.md), [Tracking](docs/tracking.md),
+  [Queue control](docs/queue-control.md), [Debugging](docs/debugging.md),
+  [Extending](docs/extending.md), [Support workflows](docs/support-workflows.md),
+  [Runtime integration](docs/runtime-integration.md)
+- **Migration guides:** [Migrating from raw REST](docs/migration-from-rest.md),
+  [Migrating from the JavaScript SDK](docs/migration-from-javascript.md)
+
+Every code sample in those guides is executed against the current public API by
+the test suite, so the documentation cannot drift from the implementation.
+
 ## Public API
 
 Importable from `convert_sdk`:
