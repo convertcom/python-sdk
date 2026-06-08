@@ -185,3 +185,117 @@ def test_request_overlay_merges_with_stored_attributes():
     result = ctx.run_experience("us-experience", attributes={"country": "US"})
     assert result is not None
     assert dict(ctx.visitor_attributes) == {"plan": "pro", "country": "CA"}
+
+
+# --- Story 3.2 AC #1: ContextState immutable update (with_attributes) -------
+
+
+def test_context_state_with_attributes_returns_new_merged_state():
+    from convert_sdk.domain.context_state import ContextState
+
+    core = _ready_core()
+    snapshot = core.current_config
+    state = ContextState(
+        visitor_id="v1",
+        snapshot=snapshot,
+        visitor_attributes={"country": "CA", "plan": "pro"},
+    )
+    updated = state.with_attributes({"country": "US", "tier": "gold"})
+    # A NEW state object is returned (immutable update, not in-place).
+    assert updated is not state
+    # New keys override; untouched keys persist (deep/shallow key-merge).
+    assert dict(updated.visitor_attributes) == {
+        "country": "US",
+        "plan": "pro",
+        "tier": "gold",
+    }
+    # The ORIGINAL state is unchanged.
+    assert dict(state.visitor_attributes) == {"country": "CA", "plan": "pro"}
+    # Identity + snapshot carry over by reference (snapshot never copied).
+    assert updated.visitor_id == "v1"
+    assert updated.snapshot is state.snapshot
+
+
+def test_context_state_with_attributes_does_not_touch_overlay_seam():
+    from convert_sdk.domain.context_state import ContextState
+
+    core = _ready_core()
+    state = ContextState(
+        visitor_id="v1",
+        snapshot=core.current_config,
+        visitor_attributes={"country": "CA"},
+    )
+    updated = state.with_attributes({"country": "US"})
+    # with_overlay (the Story 1.3 ephemeral request-time seam) is unchanged and
+    # distinct: it overlays per-call values onto the (now-updated) baseline
+    # without mutating it.
+    merged = updated.with_overlay({"country": "DE"})
+    assert dict(merged) == {"country": "DE"}
+    assert dict(updated.visitor_attributes) == {"country": "US"}
+
+
+def test_context_state_with_attributes_noop_is_content_equal():
+    from convert_sdk.domain.context_state import ContextState
+
+    core = _ready_core()
+    state = ContextState(
+        visitor_id="v1",
+        snapshot=core.current_config,
+        visitor_attributes={"country": "US"},
+    )
+    same = state.with_attributes({"country": "US"})
+    # A no-op update yields a state equal in content (determinism, AC #4).
+    assert dict(same.visitor_attributes) == dict(state.visitor_attributes)
+
+
+# --- Story 3.2 AC #1: Context.set_attributes public surface -----------------
+
+
+def test_set_attributes_updates_stored_state_for_subsequent_evaluation():
+    core = _ready_core()
+    # Stored attributes do NOT qualify for the US audience.
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "CA"})
+    assert ctx.run_experience("us-experience") is None
+
+    # Persist a visitor-attribute update.
+    result = ctx.set_attributes({"country": "US"})
+    assert result is None  # returns None (AC #1 signature)
+
+    # Subsequent evaluations on the SAME context use the UPDATED state.
+    assert ctx.run_experience("us-experience") is not None
+    assert dict(ctx.visitor_attributes) == {"country": "US"}
+
+
+def test_set_attributes_merges_new_keys_over_existing():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"plan": "pro", "country": "CA"})
+    ctx.set_attributes({"country": "US", "tier": "gold"})
+    # New keys override touched keys; untouched keys persist.
+    assert dict(ctx.visitor_attributes) == {
+        "plan": "pro",
+        "country": "US",
+        "tier": "gold",
+    }
+
+
+def test_set_attributes_rebinds_state_without_in_place_mutation():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "CA"})
+    original_state = ctx._state  # noqa: SLF001 — internal rebind assertion
+    ctx.set_attributes({"country": "US"})
+    # set_attributes rebinds the context's state to a NEW ContextState; it does
+    # NOT mutate the original frozen instance in place (Critical Warning #2).
+    assert ctx._state is not original_state  # noqa: SLF001
+    assert dict(original_state.visitor_attributes) == {"country": "CA"}
+
+
+def test_set_attributes_does_not_mutate_config_snapshot():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "CA"})
+    snapshot_before = ctx._state.snapshot  # noqa: SLF001
+    exp_keys_before = [e.get("key") for e in core.current_config.experiences]
+    ctx.set_attributes({"country": "US"})
+    # The shared immutable snapshot is never mutated or rebound by an attribute
+    # update (Critical Warning #1) — same object, same contents.
+    assert ctx._state.snapshot is snapshot_before  # noqa: SLF001
+    assert [e.get("key") for e in core.current_config.experiences] == exp_keys_before
