@@ -10,7 +10,7 @@ import convert_sdk
 
 def test_public_symbols_importable():
     """The frozen public boundary must be importable from convert_sdk."""
-    from convert_sdk import Core, Context, __version__  # noqa: F401
+    from convert_sdk import Core, Context, __version__
 
     assert Core is not None
     assert Context is not None

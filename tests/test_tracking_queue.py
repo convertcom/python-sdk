@@ -15,7 +15,6 @@ Proves the thread-safe in-process tracking queue (``tracking/queue.py``):
 
 import threading
 
-import pytest
 
 from convert_sdk.domain.results import ConversionEvent
 from convert_sdk.tracking.queue import ReleaseReason, TrackingQueue

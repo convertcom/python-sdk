@@ -25,7 +25,6 @@ import textwrap
 import time
 from pathlib import Path
 
-import pytest
 
 from .conftest import SDK_KEY
 

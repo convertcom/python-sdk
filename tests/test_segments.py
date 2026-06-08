@@ -315,12 +315,12 @@ def test_noop_set_segments_is_content_equal_and_deterministic():
     core = _eval_core()
     ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
     ctx.set_segments({"browser": "chrome"})
-    state_before = ctx._state  # noqa: SLF001
+    state_before = ctx._state
     before = ctx.run_experience("us-experience")
     # A no-op association (same values) must not change results (AC #4).
     ctx.set_segments({"browser": "chrome"})
     after = ctx.run_experience("us-experience")
-    assert dict(ctx._state.default_segments) == dict(state_before.default_segments)  # noqa: SLF001
+    assert dict(ctx._state.default_segments) == dict(state_before.default_segments)
     assert before is not None and after is not None
     assert before.variation_id == after.variation_id
 

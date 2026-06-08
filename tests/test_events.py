@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 
-import pytest
 
 from convert_sdk.events import (
     ConversionEventPayload,

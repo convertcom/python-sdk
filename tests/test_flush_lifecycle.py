@@ -13,7 +13,6 @@ runtime *scenario matrix* lives in ``tests/integration/test_queue_lifecycle.py``
 """
 
 import atexit
-import threading
 import time
 
 from convert_sdk.tracking.flush import (
