@@ -30,10 +30,12 @@ from convert_sdk.domain.context_state import ContextState
 from convert_sdk.domain.results import ConversionResult, ExperienceResult, FeatureResult
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
+from convert_sdk.ports.storage import visitor_state_key
 from convert_sdk.tracking.conversions import create_conversion
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
+    from convert_sdk.ports.storage import DataStore
     from convert_sdk.tracking.tracker import Tracker
 
 
@@ -64,6 +66,7 @@ class Context:
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         tracker: Optional["Tracker"] = None,
+        data_store: Optional["DataStore"] = None,
     ) -> None:
         # Visitor identity + stored attributes + snapshot linkage live in the
         # typed ContextState (visitor state stays separate from the snapshot).
@@ -76,6 +79,11 @@ class Context:
         # Story 2.3: shared tracking orchestrator (dedup + queue). When None,
         # track_conversion falls back to stateless create_conversion.
         self._tracker = tracker
+        # Story 3.2: the single per-Core DataStore (protocol type only — never
+        # the concrete adapter; NFR19). When None (a Context built directly
+        # rather than via Core), persistent set_attributes is an in-memory-only
+        # rebind and persistence is skipped.
+        self._data_store = data_store
         # Location is a context-local overlay, not part of ContextState.
         self._location_attributes: Mapping[str, Any] = MappingProxyType(
             dict(location_attributes or {})
@@ -142,11 +150,17 @@ class Context:
 
         No-op when no store is injected (a ``Context`` constructed directly
         rather than via ``Core``). The write is visitor-scoped: it targets only
-        this visitor's state key, never another visitor's and never a
-        ``Core``-global key. Story 3.2 wires the actual write (SDK-2).
+        this visitor's state key (:func:`visitor_state_key`), never another
+        visitor's and never a ``Core``-global key. The persisted value is the
+        plain merged attribute ``dict`` so a later ``create_context(visitor_id)``
+        rehydrates it through the same store. The ``DataStore`` four-method
+        surface is unchanged — a plain ``set`` of serialized state; no business
+        logic lives in the store.
         """
-        # Implemented in SDK-2 (DataStore persistence). Kept as a seam so the
-        # SDK-1 rebind behavior is independently testable.
+        if self._data_store is None:
+            return None
+        key = visitor_state_key(self._state.visitor_id)
+        self._data_store.set(key, dict(self._state.visitor_attributes))
         return None
 
     # --- evaluation surface ------------------------------------------------

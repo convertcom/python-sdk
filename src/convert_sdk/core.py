@@ -19,6 +19,7 @@ from convert_sdk.config import SDKConfig
 from convert_sdk.config_loader import load_snapshot
 from convert_sdk.context import Context
 from convert_sdk.domain.config_snapshot import ConfigSnapshot
+from convert_sdk.ports.storage import visitor_state_key
 
 from convert_sdk.adapters.events.in_process import InProcessEventBus
 from convert_sdk.adapters.storage.in_memory import InMemoryDataStore
@@ -129,13 +130,43 @@ class Core:
                 "Core must be initialized before creating a context "
                 "(call initialize() first)."
             )
+        # Story 3.2: rehydrate any persisted per-visitor ContextState through the
+        # SAME single per-Core DataStore + visitor-scoped key. Stored attributes
+        # form the baseline; caller-supplied visitor_attributes for this fresh
+        # context override matching keys (explicit construction wins). The read
+        # is strictly visitor-scoped and goes through the DataStore protocol
+        # only — Core (L4) owns the concrete store; downstream sees the protocol.
+        hydrated = self._hydrate_visitor_attributes(visitor_id, visitor_attributes)
         return Context(
             visitor_id,
             self._snapshot,
-            visitor_attributes=visitor_attributes,
+            visitor_attributes=hydrated,
             location_attributes=location_attributes,
             tracker=self._tracker,
+            data_store=self._data_store,
         )
+
+    def _hydrate_visitor_attributes(
+        self,
+        visitor_id: str,
+        visitor_attributes: Optional[Mapping[str, Any]],
+    ) -> Optional[Mapping[str, Any]]:
+        """Merge any persisted visitor attributes with the caller-supplied ones.
+
+        Reads this visitor's persisted ``ContextState`` attributes (written by
+        :meth:`convert_sdk.context.Context.set_attributes`) through the single
+        per-Core ``DataStore`` and overlays the caller-supplied
+        ``visitor_attributes`` on top (explicit construction wins). Returns the
+        caller value unchanged when nothing is persisted, so contexts for
+        visitors that never called ``set_attributes`` behave exactly as before.
+        """
+        stored = self._data_store.get(visitor_state_key(visitor_id))
+        if not isinstance(stored, Mapping) or not stored:
+            return visitor_attributes
+        merged = dict(stored)
+        if visitor_attributes:
+            merged.update(visitor_attributes)
+        return merged
 
     # --- tracking flush ----------------------------------------------------
 
