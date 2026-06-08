@@ -252,15 +252,53 @@ This project uses [uv](https://docs.astral.sh/uv/) and the `hatchling` build
 backend.
 
 ```bash
-# Install dev tooling
+# Install dev tooling (pytest, ruff, mypy, towncrier, coverage)
 uv sync --group dev
 
 # Run the test suite
 uv run pytest
 
+# Lint and type-check (the CI gates)
+uv run ruff check src tests scripts
+uv run mypy --strict
+
 # Build wheel and sdist
 uv build
 ```
+
+Every change runs through CI (`.github/workflows/ci.yml`): Ruff lint, mypy
+`--strict`, a 15-cell test matrix (Python 3.9–3.13 × {ubuntu, macos, windows})
+with an 85% project / 95% `evaluation/` coverage floor, a release-blocking parity
+suite, a dependency-bounds check, a changelog-fragment check, and a build. PRs
+with user-visible impact must add a [changelog fragment](changes/README.md).
+
+Reproduce all the release gates locally in one command:
+
+```bash
+python scripts/verify_release.py --version 0.1.0
+```
+
+## Releasing
+
+The SDK publishes to PyPI as **`convert-python-sdk`** via a tag-triggered GitHub
+Actions workflow using **OIDC Trusted Publishing** — there are no long-lived PyPI
+tokens in repository secrets.
+
+```bash
+# 1. Bump src/convert_sdk/version.py, then validate locally:
+python scripts/verify_release.py --version 0.1.0
+
+# 2. Merge the version bump to main (CI must be green), then tag and push:
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Pushing a `v*` tag re-runs the full CI gate, compiles the towncrier changelog,
+builds the wheel + sdist, publishes to PyPI via OIDC, and creates a GitHub
+Release with the compiled changelog. The complete maintainer workflow — including
+the one-time PyPI Trusted Publisher setup, dependency-bounds policy, and
+parity-fixture regeneration — is documented in
+[`docs/release-process.md`](docs/release-process.md).
 
 ## License
 
