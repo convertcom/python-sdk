@@ -11,11 +11,12 @@ wall clock.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import threading
+from typing import Any, Dict, List, Optional
 
 import pytest
 
-from convert_sdk import RefreshConfig, SDKConfig
+from convert_sdk import Core, RefreshConfig, SDKConfig, TransportConfig
 from convert_sdk.errors import InvalidConfigError
 
 
@@ -130,3 +131,121 @@ class TestRefreshConfigValidation:
         rc = RefreshConfig()
         with pytest.raises(Exception):
             rc.interval_seconds = 1  # type: ignore[misc]
+
+
+# --------------------------------------------------------------------------- #
+# Task 2 — ConfigRefresher worker + atomic Core snapshot-swap seam
+# --------------------------------------------------------------------------- #
+
+
+def _remote_config(refresh: Optional[RefreshConfig]) -> SDKConfig:
+    return SDKConfig(
+        sdk_key="key-123",
+        transport=TransportConfig(base_url="https://cdn.example.com"),
+        refresh=refresh,
+    )
+
+
+class TestConfigRefresherWorker:
+    def test_worker_applies_new_snapshot_on_trigger(self) -> None:
+        transport = _FakeTransport(
+            [
+                _config_payload(project_id="proj-1"),
+                _config_payload(project_id="proj-2"),
+            ]
+        )
+        applied: List[Any] = []
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+
+        refresher = ConfigRefresher(
+            config=_remote_config(RefreshConfig(interval_seconds=300)),
+            transport=transport,
+            on_snapshot=applied.append,
+        )
+        refresher.start()
+        try:
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+        finally:
+            refresher.stop()
+        assert applied, "worker should have produced at least one snapshot"
+        assert applied[-1].project_id == "proj-2"
+
+    def test_worker_thread_is_daemon(self) -> None:
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+
+        refresher = ConfigRefresher(
+            config=_remote_config(RefreshConfig()),
+            transport=_FakeTransport([]),
+            on_snapshot=lambda _s: None,
+        )
+        refresher.start()
+        try:
+            assert refresher.is_alive()
+            assert refresher.is_daemon()
+        finally:
+            refresher.stop()
+        assert not refresher.is_alive()
+
+    def test_direct_config_refresher_rejected(self) -> None:
+        """A refresher has no remote endpoint to poll in direct-config mode."""
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+
+        with pytest.raises(InvalidConfigError):
+            ConfigRefresher(
+                config=SDKConfig(data=_config_payload(), refresh=RefreshConfig()),
+                transport=_FakeTransport([]),
+                on_snapshot=lambda _s: None,
+            )
+
+
+class TestCoreRefreshIntegration:
+    def test_opt_in_refresh_swaps_live_snapshot(self) -> None:
+        transport = _FakeTransport(
+            [
+                _config_payload(project_id="proj-1"),  # initialize()
+                _config_payload(project_id="proj-2"),  # refresh
+            ]
+        )
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        core.initialize()
+        try:
+            assert core.current_config is not None
+            assert core.current_config.project_id == "proj-1"
+            core.refresh_now()
+            assert core.current_config.project_id == "proj-2"
+        finally:
+            core.close()
+
+    def test_opt_out_starts_no_worker(self) -> None:
+        before = threading.active_count()
+        transport = _FakeTransport([_config_payload()])
+        core = Core(_remote_config(None), transport=transport)
+        core.initialize()
+        try:
+            # No daemon refresh thread spun up; refresh_now is a no-op.
+            assert threading.active_count() == before
+            core.refresh_now()
+            assert transport.fetch_calls == 1  # only the initial load
+        finally:
+            core.close()
+
+    def test_direct_config_with_refresh_skips_worker(self) -> None:
+        before = threading.active_count()
+        core = Core(SDKConfig(data=_config_payload(), refresh=RefreshConfig()))
+        core.initialize()
+        try:
+            assert threading.active_count() == before
+            core.refresh_now()  # no-op, no transport
+        finally:
+            core.close()
+
+    def test_close_stops_worker(self) -> None:
+        transport = _FakeTransport([_config_payload(), _config_payload()])
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        core.initialize()
+        before = threading.active_count()
+        assert before >= 1
+        core.close()
+        # The daemon refresh thread has stopped.
+        assert not core._refresher_alive()  # type: ignore[attr-defined]
