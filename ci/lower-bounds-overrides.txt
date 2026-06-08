@@ -1,0 +1,15 @@
+# Lower-bound dependency pins for the CI bounds-check job (qs-09).
+#
+# This is the SOLE location where exact runtime-dependency versions are pinned.
+# pyproject.toml declares compatible-release RANGES (never exact pins); this
+# pip-constraints-style file pins each runtime dependency to the OLDEST version
+# the SDK claims to support, so CI can prove the SDK works at the bottom edge of
+# its declared bounds (where breakage is most likely as the SDK ages).
+#
+# httpx is the SDK's ONLY runtime dependency. The bucketing layer ships a
+# pure-Python MurmurHash3 implementation (no mmh3 / hashing dependency), so this
+# file pins httpx alone. See adr-python-sdk-planning-reconciliation.md decision
+# #10 and qs-09-dependency-bounds-verification.md.
+#
+# pyproject declares: httpx>=0.28,<1.0  ->  lower bound == 0.28.0
+httpx==0.28.0
