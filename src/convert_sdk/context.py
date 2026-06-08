@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar
 
 from convert_sdk._internal.redaction import SafeContext, fingerprint_visitor
 from convert_sdk.domain.context_state import ContextState
@@ -39,6 +39,7 @@ from convert_sdk.domain.results import (
     FeatureDiagnostic,
     FeatureResult,
     GoalDiagnostic,
+    _Diagnostic,
 )
 from convert_sdk.evaluation import entity_lookup
 from convert_sdk.evaluation.bucketing import get_bucket_value_for_visitor
@@ -54,6 +55,13 @@ from convert_sdk.tracking.conversions import create_conversion
 # the default-segment state (JS ``SegmentsKeys.CUSTOM_SEGMENTS`` parity). Kept in
 # sync with the ``customSegments`` allowlist key in ``tracking/payloads.py``.
 _CUSTOM_SEGMENTS_KEY = "customSegments"
+
+# Generic over the four frozen Story-4.2 typed diagnostic dataclasses so
+# ``_diagnose`` returns the SAME type the caller passes as ``cls`` (mypy strict:
+# no implicit ``Any`` leaking out of the central diagnostic builder). Bounded to
+# the shared ``_Diagnostic`` base so the ``reason``/``message``/``details``
+# construction keywords are type-visible to mypy.
+_DiagnosticT = TypeVar("_DiagnosticT", bound=_Diagnostic)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
@@ -99,8 +107,8 @@ class Context:
         self._state = ContextState(
             visitor_id=visitor_id,
             snapshot=snapshot,
-            visitor_attributes=visitor_attributes,
-            default_segments=default_segments,
+            visitor_attributes=visitor_attributes or {},
+            default_segments=default_segments or {},
         )
         self._snapshot = snapshot
         # Story 2.3: shared tracking orchestrator (dedup + queue). When None,
@@ -861,7 +869,7 @@ class Context:
 
     def _diagnose(
         self,
-        cls: Any,
+        cls: type[_DiagnosticT],
         entity_key: Optional[str],
         reason: DiagnosticReason,
         message: str,
@@ -869,7 +877,7 @@ class Context:
         *,
         bucket_value: Optional[int] = None,
         variation_key: Optional[str] = None,
-    ) -> Any:
+    ) -> _DiagnosticT:
         """Build a typed diagnostic and mirror miss-path reasons to the log seam.
 
         Centralizes the log emission so every ``diagnose_*`` path emits the SAME

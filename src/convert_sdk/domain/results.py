@@ -210,7 +210,7 @@ class ConversionResult:
         """
         if self.status is ConversionStatus.QUEUED:
             return None
-        return self.status.value
+        return str(self.status.value)
 
 
 class DiagnosticReason(str, enum.Enum):

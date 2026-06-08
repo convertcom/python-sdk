@@ -87,12 +87,9 @@ def redact_url(url: Optional[str]) -> Optional[str]:
     parts = urlsplit(url)
     host = parts.netloc or ""
     path = parts.path or ""
-    if host or path:
-        endpoint = f"{host}{path}"
-    else:
-        # Not a recognizable absolute URL; strip any query suffix from the raw
-        # value rather than emitting it verbatim.
-        endpoint = url.split("?", 1)[0]
+    # A recognizable absolute URL keeps host+path; otherwise strip any query
+    # suffix from the raw value rather than emitting it verbatim.
+    endpoint = f"{host}{path}" if host or path else url.split("?", 1)[0]
     return _CONFIG_ROUTE_RE.sub(
         lambda m: f"{m.group(1)}{redact_key(m.group(2))}", endpoint
     )

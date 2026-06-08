@@ -48,7 +48,7 @@ class Core:
 
     def __init__(self, config: SDKConfig, *, transport: Optional["Transport"] = None) -> None:
         self._config = config
-        self._transport = transport
+        self._transport: Optional["Transport"] = transport
         self._owns_transport = False
         self._snapshot: Optional[ConfigSnapshot] = None
         self._ready = False
@@ -250,7 +250,7 @@ class Core:
             raw = self._load_raw_config()
             # load_snapshot validates + normalizes; any failure leaves us not-ready.
             self._snapshot = load_snapshot(raw)
-        except Exception as error:  # noqa: BLE001 - log then re-raise unchanged
+        except Exception as error:
             status = getattr(error, "status_code", None)
             log_safe(
                 LifecycleEvent.CONFIG_UPDATED,
@@ -335,6 +335,5 @@ class Core:
     def __enter__(self) -> "Core":
         return self
 
-    def __exit__(self, *exc: Any) -> bool:
+    def __exit__(self, *exc: Any) -> None:
         self.close()
-        return False

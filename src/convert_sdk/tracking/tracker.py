@@ -351,7 +351,7 @@ class Tracker:
             error=error,
         )
 
-    def _build_batch_payload(self, items: List[VisitorQueueItem]) -> dict:
+    def _build_batch_payload(self, items: List[VisitorQueueItem]) -> dict[str, Any]:
         """Serialize all drained per-visitor items into ONE batch envelope.
 
         Reuses the Story 2.2 ``build_tracking_payload`` serializer (single
@@ -364,8 +364,8 @@ class Tracker:
         once and never re-derived in the flush path (no second serializer).
         """
         # visitor_id -> merged visitors[] entry (preserving insertion order).
-        merged: "dict[str, dict]" = {}
-        envelope: Optional[dict] = None
+        merged: "dict[str, dict[str, Any]]" = {}
+        envelope: Optional[dict[str, Any]] = None
         for item in items:
             for event in item.events:
                 single = build_tracking_payload(

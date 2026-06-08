@@ -41,6 +41,7 @@ packages = ["src/convert_sdk"]
 include = [
     "src/convert_sdk",
     "README.md",
+    "CHANGELOG.md",
     "pyproject.toml",
     # Ship the runnable quickstart examples in the source distribution so the
     # onboarding path travels with the package (Story 1.6).
@@ -52,11 +53,130 @@ include = [
 # examples/ are importable as the `examples` package from the drift-protection
 # tests (tests/test_examples.py), without requiring PYTHONPATH to be set in CI.
 pythonpath = ["."]
+testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# Ruff lint (qs-02). Story 5.1 STANDS UP the lint gate. The rule set is the
+# substantive E/W/F/B/SIM/RUF selection (qs-02 / Story DAR); UP and I are
+# intentionally NOT enabled to avoid forcing unrelated stylistic refactors of
+# the existing codebase. line-length is set to 100 to match the codebase's
+# established line convention (it was authored to ~100, not the 88 default) —
+# this enforces the gate on real lines without churning every wrapped string.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and dev scripts are NOT shippable package code. They follow test-side
+# conventions that the gate intentionally does not enforce, keeping the gate
+# strict on src/ (the shippable surface) without churning the 687-test baseline
+# or the reused Story-3.5 parity-fixture generator (F-017 — reuse, don't
+# refactor). Scoped-out findings:
+#   B017  - tests assert against broad Exception by design
+#   RUF002- docstrings copy JS contract prose with EN-DASH/typographic chars
+#   E501  - long literal fixtures / copied prose lines
+#   B904  - the fixture generator re-raises setup errors without chaining
+#   SIM118/RUF059 - test-local style choices
+"tests/**" = ["B017", "RUF002", "E501", "SIM118", "RUF059"]
+"scripts/**" = ["B017", "B904", "E501"]
+
+# ---------------------------------------------------------------------------
+# mypy strict (qs-02). The gate runs strict on the shippable package. Story 5.1
+# fixed the trivial annotation gaps so strict is genuinely green at the gate.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.9"
+strict = true
+files = ["src/convert_sdk"]
+# Only type-check the shippable package; do not descend into third-party deps
+# (dev tools like click/towncrier may use newer-than-3.9 syntax that mypy would
+# otherwise flag under our py39 target). httpx ships inline types, so the SDK's
+# own httpx usage is still strictly checked.
+follow_imports = "silent"
+follow_imports_for_stubs = false
+
+[[tool.mypy.overrides]]
+module = ["click.*", "towncrier.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# ---------------------------------------------------------------------------
+# Coverage (qs-03). Project floor 85%, evaluation floor 95% (enforced as a
+# separate CI step / verify_release.py gate). Measured on the import package.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["convert_sdk"]
+branch = false
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 85
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
+
+# ---------------------------------------------------------------------------
+# Towncrier (qs-10). Fragments live under changes/ and compile into CHANGELOG.md
+# at release time only (never hand-edited). Categories per the architecture.
+# ---------------------------------------------------------------------------
+[tool.towncrier]
+package = "convert_sdk"
+package_dir = "src"
+directory = "changes"
+filename = "CHANGELOG.md"
+title_format = "## {version} ({project_date})"
+issue_format = "#{issue}"
+start_string = "<!-- towncrier release notes start -->\n"
+underlines = ["", "", ""]
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "Features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "Bug Fixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "breaking"
+name = "Breaking Changes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "deprecation"
+name = "Deprecations"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "internal"
+name = "Internal / Maintenance"
+showcontent = true
 
 [dependency-groups]
 dev = [
-    "pytest>=8,<9",
+    # pytest pinned to the 8.4.x line: pytest 9 drops Python 3.9 support, which
+    # would break the lower edge of the CI matrix (architecture decision; qs-02).
+    "pytest>=8.4,<8.5",
     # RESPX route-level HTTPX mocking for transport/config-fetch tests
     # (qs-06 integration-test-harness pattern; no socket-level patching).
     "respx>=0.21,<1.0",
+    # Release/CI quality gates (Story 5.1): coverage, lint, type-check, changelog.
+    "pytest-cov>=5,<6",
+    "ruff>=0.6,<1.0",
+    "mypy>=1.11,<2.0",
+    "towncrier>=24,<25",
 ]
