@@ -23,6 +23,7 @@ from convert_sdk.core import Core
 from convert_sdk.domain.results import (
     ConversionResult,
     ConversionStatus,
+    CustomSegmentsResult,
     ExperienceResult,
     FeatureResult,
     FeatureStatus,
@@ -63,6 +64,8 @@ __all__ = [
     # Conversion tracking foundation (Story 2.1).
     "ConversionResult",
     "ConversionStatus",
+    # Story 3.3 custom-segment evaluation typed result (FR15).
+    "CustomSegmentsResult",
     # Lifecycle events public surface (Story 2.4): consumers need this enum to
     # call Core.on(LifecycleEvent.API_QUEUE_RELEASED, ...).
     "LifecycleEvent",
