@@ -213,6 +213,101 @@ class ConversionResult:
         return self.status.value
 
 
+class DiagnosticReason(str, enum.Enum):
+    """The CLOSED vocabulary naming *why* a request did/did not resolve (FR50).
+
+    A ``str``-Enum so each member compares and serializes as its stable wire
+    value (``DiagnosticReason.ENTITY_NOT_FOUND == "entity_not_found"``) without a
+    caller ever parsing free-form strings. The set is FROZEN and authoritative
+    (F-018): adding or renaming a member is a breaking change to the cross-SDK
+    diagnostic contract, so it is kept deliberately small and aligned with the
+    JavaScript SDK's diagnostic vocabulary (Critical Warning #4). Story 4.3's
+    cross-SDK debugging bundle is intentionally NOT part of this set
+    (Critical Warning — scope).
+
+    Members:
+
+    * ``RESOLVED`` — the request resolved to a concrete outcome (not a miss).
+    * ``AUDIENCE_MISMATCH`` — the visitor did not qualify for the experience's
+      audience/location rules.
+    * ``EXPERIENCE_NOT_FOUND`` — no experience matched the requested key.
+    * ``FEATURE_NOT_IN_SELECTED_VARIATIONS`` — the feature is declared but the
+      visitor's bucketed variation(s) carry no change for it.
+    * ``FEATURE_NOT_FOUND`` — no feature matched the requested key.
+    * ``GOAL_NOT_FOUND`` — no goal matched the requested key.
+    * ``ENTITY_NOT_FOUND`` — a config-entity lookup found no match (unknown
+      key/id, wrong or unsupported ``entity_type``).
+    * ``PROJECT_MAPPING_REQUIRED`` — the loaded config lacks the project mapping
+      required to resolve the request.
+    """
+
+    RESOLVED = "resolved"
+    AUDIENCE_MISMATCH = "audience_mismatch"
+    EXPERIENCE_NOT_FOUND = "experience_not_found"
+    FEATURE_NOT_IN_SELECTED_VARIATIONS = "feature_not_in_selected_variations"
+    FEATURE_NOT_FOUND = "feature_not_found"
+    GOAL_NOT_FOUND = "goal_not_found"
+    ENTITY_NOT_FOUND = "entity_not_found"
+    PROJECT_MAPPING_REQUIRED = "project_mapping_required"
+
+
+@dataclass(frozen=True)
+class _Diagnostic:
+    """Shared frozen base for the typed no-result diagnostic outcomes (FR50).
+
+    Carries a closed :class:`DiagnosticReason` plus a short, human-readable
+    ``message`` and an allowlist-safe, read-only ``details`` mapping. The
+    dataclass is FROZEN and its field names are part of the public, stable
+    contract (Critical Warning #5): a field rename is a breaking change.
+
+    ``details`` is wrapped read-only in ``__post_init__`` (the same convention as
+    :class:`ExperienceResult` / :class:`FeatureResult`) so a returned diagnostic
+    can never be used to mutate caller- or snapshot-derived state. Callers MUST
+    put only NFR6-safe values into ``details`` (e.g. the requested key,
+    ``entity_type``) — never raw visitor attributes, SDK keys, or PII.
+    """
+
+    reason: DiagnosticReason
+    message: str
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.details, MappingProxyType):
+            object.__setattr__(
+                self, "details", MappingProxyType(dict(self.details))
+            )
+
+    @property
+    def resolved(self) -> bool:
+        """Whether this diagnostic represents a resolved (non-miss) outcome."""
+        return self.reason is DiagnosticReason.RESOLVED
+
+
+@dataclass(frozen=True)
+class ExperienceDiagnostic(_Diagnostic):
+    """Why a :meth:`Context.diagnose_experience` request did/did not resolve (FR50)."""
+
+
+@dataclass(frozen=True)
+class FeatureDiagnostic(_Diagnostic):
+    """Why a :meth:`Context.diagnose_feature` request did/did not resolve (FR50)."""
+
+
+@dataclass(frozen=True)
+class GoalDiagnostic(_Diagnostic):
+    """Why a :meth:`Context.diagnose_goal` request did/did not resolve (FR50)."""
+
+
+@dataclass(frozen=True)
+class EntityDiagnostic(_Diagnostic):
+    """Why a :meth:`Context.diagnose_entity` lookup did/did not resolve (FR50).
+
+    The additive, typed counterpart to the Story 3.4
+    ``get_config_entity*`` ``None`` returns. Existing ``None``-returning callers
+    are unaffected (Critical Warning #1); this is an opt-in surface.
+    """
+
+
 @dataclass(frozen=True)
 class CustomSegmentsResult:
     """The typed outcome of :meth:`convert_sdk.context.Context.run_custom_segments`.

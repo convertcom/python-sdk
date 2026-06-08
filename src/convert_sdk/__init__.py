@@ -24,9 +24,14 @@ from convert_sdk.domain.results import (
     ConversionResult,
     ConversionStatus,
     CustomSegmentsResult,
+    DiagnosticReason,
+    EntityDiagnostic,
+    ExperienceDiagnostic,
     ExperienceResult,
+    FeatureDiagnostic,
     FeatureResult,
     FeatureStatus,
+    GoalDiagnostic,
 )
 from convert_sdk.errors import (
     ConfigError,
@@ -66,6 +71,13 @@ __all__ = [
     "ConversionStatus",
     # Story 3.3 custom-segment evaluation typed result (FR15).
     "CustomSegmentsResult",
+    # Story 4.2 typed diagnosable no-result outcomes (FR50): the closed reason
+    # vocabulary plus the frozen per-surface diagnostic dataclasses.
+    "DiagnosticReason",
+    "ExperienceDiagnostic",
+    "FeatureDiagnostic",
+    "GoalDiagnostic",
+    "EntityDiagnostic",
     # Lifecycle events public surface (Story 2.4): consumers need this enum to
     # call Core.on(LifecycleEvent.API_QUEUE_RELEASED, ...).
     "LifecycleEvent",
