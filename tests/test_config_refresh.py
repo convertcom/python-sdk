@@ -255,3 +255,145 @@ class TestCoreRefreshIntegration:
         core.close()
         # The daemon refresh thread has stopped.
         assert not core._refresher_alive()  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------- #
+# Task 3 — failure handling, backoff, diagnostics, CONFIG_UPDATED, tracking
+# --------------------------------------------------------------------------- #
+
+
+class TestRefreshFailureHandling:
+    def test_transient_failure_keeps_prior_snapshot(self) -> None:
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+        from convert_sdk.errors import ConfigLoadError
+
+        transport = _FakeTransport([ConfigLoadError("boom")])
+        applied: List[Any] = []
+        refresher = ConfigRefresher(
+            config=_remote_config(RefreshConfig(interval_seconds=300)),
+            transport=transport,
+            on_snapshot=applied.append,
+        )
+        refresher.start()
+        try:
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+        finally:
+            refresher.stop()
+        # The failed fetch produced no snapshot; the worker survived (cycle done).
+        assert applied == []
+
+    def test_terminal_failure_callback_fires_at_backoff_cap(self) -> None:
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+        from convert_sdk.errors import ConfigLoadError
+
+        # backoff_max == interval so the cap is reached after a single failure.
+        policy = RefreshConfig(
+            interval_seconds=300, backoff_factor=2.0, backoff_max_seconds=300
+        )
+        transport = _FakeTransport([ConfigLoadError("boom"), ConfigLoadError("boom")])
+        seen: List[BaseException] = []
+        refresher = ConfigRefresher(
+            config=_remote_config(policy),
+            transport=transport,
+            on_snapshot=lambda _s: None,
+            on_terminal_failure=seen.append,
+        )
+        refresher.start()
+        try:
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+            refresher.trigger_now()
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+        finally:
+            refresher.stop()
+        assert seen, "terminal-failure callback should have fired at the cap"
+        assert isinstance(seen[-1], ConfigLoadError)
+
+    def test_terminal_callback_that_raises_is_swallowed(self) -> None:
+        from convert_sdk.config_loader.refresh import ConfigRefresher
+        from convert_sdk.errors import ConfigLoadError
+
+        policy = RefreshConfig(interval_seconds=300, backoff_max_seconds=300)
+
+        def _boom(_exc: BaseException) -> None:
+            raise RuntimeError("handler blew up")
+
+        transport = _FakeTransport([ConfigLoadError("boom")])
+        refresher = ConfigRefresher(
+            config=_remote_config(policy),
+            transport=transport,
+            on_snapshot=lambda _s: None,
+            on_terminal_failure=_boom,
+        )
+        refresher.start()
+        try:
+            refresher.trigger_now()
+            # A raising callback must not crash the worker.
+            assert refresher.wait_for_next_refresh(timeout=5.0)
+            assert refresher.is_alive()
+        finally:
+            refresher.stop()
+
+    def test_failure_does_not_crash_core_host(self) -> None:
+        from convert_sdk.errors import ConfigLoadError
+
+        transport = _FakeTransport(
+            [_config_payload(project_id="proj-1"), ConfigLoadError("boom")]
+        )
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        core.initialize()
+        try:
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=5.0)  # type: ignore[attr-defined]
+            # Background failure: prior good snapshot still served, host alive.
+            assert core.current_config is not None
+            assert core.current_config.project_id == "proj-1"
+        finally:
+            core.close()
+
+
+class TestConfigUpdatedEvent:
+    def test_config_updated_emitted_on_successful_swap(self) -> None:
+        from convert_sdk import LifecycleEvent
+
+        transport = _FakeTransport(
+            [_config_payload(project_id="proj-1"), _config_payload(project_id="proj-2")]
+        )
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        payloads: List[Any] = []
+        core.on(LifecycleEvent.CONFIG_UPDATED, lambda payload, _err: payloads.append(payload))
+        core.initialize()
+        try:
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=5.0)  # type: ignore[attr-defined]
+        finally:
+            core.close()
+        assert payloads, "CONFIG_UPDATED should fire on the refresh swap"
+
+
+class TestTrackingMetadataRepoint:
+    def test_queue_update_snapshot_metadata(self) -> None:
+        from convert_sdk.tracking.queue import TrackingQueue
+
+        queue = TrackingQueue(batch_size=10)
+        queue.update_snapshot_metadata(account_id="acc-2", project_id="proj-2")
+        assert queue.account_id == "acc-2"
+        assert queue.project_id == "proj-2"
+
+    def test_refresh_repoints_tracking_to_new_project(self) -> None:
+        transport = _FakeTransport(
+            [
+                _config_payload(account_id="acc-1", project_id="proj-1"),
+                _config_payload(account_id="acc-1", project_id="proj-2"),
+            ]
+        )
+        core = Core(_remote_config(RefreshConfig(interval_seconds=300)), transport=transport)
+        core.initialize()
+        try:
+            core.refresh_now()
+            assert core._refresher.wait_for_next_refresh(timeout=5.0)  # type: ignore[attr-defined]
+            # The shared tracker now serializes against the new project id.
+            assert core._tracker._snapshot.project_id == "proj-2"  # type: ignore[attr-defined]
+        finally:
+            core.close()
