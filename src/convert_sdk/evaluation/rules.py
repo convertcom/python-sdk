@@ -22,7 +22,8 @@ dicts; it never mutates either.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence
+import re
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 # ---------------------------------------------------------------------------
 # Comparison operators (mirror packages/utils/src/comparisons.ts).
@@ -99,8 +100,72 @@ def _not_exists(value: Any, _test_against: Any) -> bool:
     return value is None or value == ""
 
 
+def _is_in(values: Any, test_against: Any, splitter: str = "|") -> bool:
+    """Check whether any element of ``values`` appears in ``test_against``.
+
+    Mirrors ``Comparisons.isIn`` in the JS SDK
+    (``packages/utils/src/comparisons.ts``):
+
+    * ``values`` is coerced to a string and split by ``splitter`` (default
+      ``"|"``).  Each resulting element is kept as-is (NOT lowercased) for
+      membership lookup.
+    * ``test_against`` is either a string split by ``splitter``, already a
+      list/tuple, or a scalar value wrapped in a one-element list.  Each
+      element is lowercased before the lookup.
+    * The membership test therefore is: any visitor-value token (verbatim)
+      appears in the lowercased test-against list.  Because the visitor token
+      is also compared verbatim the match is case-sensitive from the visitor's
+      side — mirroring the JS source of truth exactly.
+
+    The ``splitter`` parameter is exposed for comma-delimited configs
+    (``splitter=","``); callers may pass it via extra rule-level metadata.
+    The default ``"|"`` matches both the JS and PHP SDKs.
+    """
+    matched_values = [str(item) for item in str(values).split(splitter)]
+
+    test_against_list: list[str]
+    if isinstance(test_against, str):
+        test_against_list = test_against.split(splitter)
+    elif isinstance(test_against, (list, tuple)):
+        test_against_list = [str(item) for item in test_against]
+    else:
+        # Scalar: wrap in a single-item list (mirrors JS ``testAgainst = []``
+        # fallback path; a non-string, non-array testAgainst becomes an empty
+        # array in JS.  PHP wraps scalars in a list.  We follow PHP here for
+        # practical parity: a plain number testAgainst is supported.)
+        test_against_list = [str(test_against)]
+
+    # Lowercase only the test-against side (mirrors JS exactly).
+    lowered = [item.lower() for item in test_against_list]
+
+    return any(item in lowered for item in matched_values)
+
+
+def _regex_matches(value: Any, test_against: Any) -> bool:
+    """Test ``value`` against a regex pattern ``test_against``.
+
+    Mirrors ``Comparisons.regexMatches`` in the JS SDK
+    (``packages/utils/src/comparisons.ts``):
+
+    * ``value`` is coerced to a lower-cased string.
+    * ``test_against`` is coerced to a string (pattern) — the case flag is
+      applied by the regex engine itself (``re.IGNORECASE``), so the pattern
+      is NOT lowercased.
+    * An invalid (unparseable) pattern returns ``False`` — never raises, to
+      match PHP's ``preg_match`` error suppression.
+    """
+    str_value = str(value).lower()
+    pattern = str(test_against)
+    try:
+        return bool(re.search(pattern, str_value, re.IGNORECASE))
+    except re.error:
+        return False
+
+
 # match_type -> comparison callable. Aliases mirror the JS Comparisons class.
-_COMPARATORS = {
+# Typed as Callable[..., bool] to accommodate operators with different arities
+# (e.g. _is_in has an optional splitter parameter).
+_COMPARATORS: dict[str, Callable[..., bool]] = {
     "equals": _equals,
     "equalsNumber": _equals,
     "matches": _equals,
@@ -112,6 +177,8 @@ _COMPARATORS = {
     "exists": _exists,
     "not_exists": _not_exists,
     "doesNotExist": _not_exists,
+    "isIn": _is_in,
+    "regexMatches": _regex_matches,
 }
 
 # Operators that are meaningful even when the key is absent from the data.

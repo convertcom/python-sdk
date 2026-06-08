@@ -767,6 +767,142 @@
         ]
       },
       "expected": false
+    },
+    {
+      "id": "isIn_pipe_hit",
+      "data": {"tier": "a"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": false}, "key": "tier", "value": "a|b|c|d|e"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "isIn_pipe_miss",
+      "data": {"tier": "z"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": false}, "key": "tier", "value": "a|b|c|d|e"}]}]}]
+      },
+      "expected": false
+    },
+    {
+      "id": "isIn_negated_hit",
+      "data": {"tier": "z"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": true}, "key": "tier", "value": "a|b|c|d|e"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "isIn_negated_miss",
+      "data": {"tier": "a"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": true}, "key": "tier", "value": "a|b|c|d|e"}]}]}]
+      },
+      "expected": false
+    },
+    {
+      "id": "isIn_multi_value_visitor_hit",
+      "data": {"tier": "a|c"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": false}, "key": "tier", "value": "a|b|c|d|e"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "isIn_array_testAgainst_miss",
+      "data": {"code": "orange"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": false}, "key": "code", "value": ["ab", "cd", "ef"]}]}]}]
+      },
+      "expected": false
+    },
+    {
+      "id": "isIn_array_testAgainst_negated_hit",
+      "data": {"code": "orange"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": true}, "key": "code", "value": ["ab", "cd", "ef"]}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "isIn_multi_value_against_array_hit",
+      "data": {"code": "ab|ef"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": false}, "key": "code", "value": ["ab", "cd", "ef"]}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "isIn_number_in_array_hit",
+      "data": {"score": "456"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "isIn", "negated": false}, "key": "score", "value": [123, 456, 789]}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "regexMatches_word_chars_hit",
+      "data": {"label": "orange"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "label", "value": "\\w+"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "regexMatches_word_chars_with_exclamation_hit",
+      "data": {"label": "An APPle!"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "label", "value": "\\w+"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "regexMatches_digits_hit",
+      "data": {"code": "111222333"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "code", "value": "\\d+"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "regexMatches_digits_negated_false",
+      "data": {"code": "111222333"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": true}, "key": "code", "value": "\\d+"}]}]}]
+      },
+      "expected": false
+    },
+    {
+      "id": "regexMatches_invalid_pattern_false",
+      "data": {"path": "/?wwww"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "path", "value": "/?wwww[invalid"}]}]}]
+      },
+      "expected": false
+    },
+    {
+      "id": "regexMatches_email_valid_hit",
+      "data": {"email": "test@email.com"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "email", "value": "^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*$"}]}]}]
+      },
+      "expected": true
+    },
+    {
+      "id": "regexMatches_not_email_miss",
+      "data": {"email": "Not an email"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "email", "value": "^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*$"}]}]}]
+      },
+      "expected": false
+    },
+    {
+      "id": "regexMatches_case_insensitive_hit",
+      "data": {"brand": "Convert Experiences"},
+      "rule": {
+        "OR": [{"AND": [{"OR_WHEN": [{"matching": {"match_type": "regexMatches", "negated": false}, "key": "brand", "value": "^convert"}]}]}]
+      },
+      "expected": true
     }
   ]
 }
