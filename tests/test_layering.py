@@ -179,6 +179,44 @@ def test_domain_config_snapshot_stays_l0_clean():
     )
 
 
+def test_internal_redaction_is_stdlib_only_leaf():
+    # Story 4.1: _internal/redaction.py is the L0 leaf utility — it must import
+    # stdlib ONLY and reach back into NO other convert_sdk module (no upward
+    # imports). Everything else may import it inward.
+    redaction = _SRC / "_internal" / "redaction.py"
+    assert redaction.exists(), "_internal/redaction.py (Story 4.1) must exist"
+    modules = _imported_modules(redaction)
+    offenders = [m for m in modules if m.startswith("convert_sdk")]
+    assert offenders == [], (
+        "_internal/redaction.py (L0 leaf) must import stdlib only; "
+        f"upward convert_sdk imports found: {offenders}"
+    )
+
+
+def test_logging_module_does_not_import_higher_layers():
+    # Story 4.1: logging.py may import the L0 leaf _internal/ utilities and the
+    # L0 LifecycleEvent enum (events.py), but must NOT import adapters/transport/
+    # evaluation/tracking/context/core — it is a low-level cross-cutting utility
+    # consumed by higher layers; it must not pull the composition root inward.
+    logging_mod = _SRC / "logging.py"
+    modules = _imported_modules(logging_mod)
+    forbidden_fragments = (
+        "convert_sdk.adapters",
+        "convert_sdk.evaluation",
+        "convert_sdk.tracking",
+        "convert_sdk.context",
+        "convert_sdk.core",
+        "convert_sdk.ports",
+    )
+    offenders = [
+        m for m in modules if any(frag in m for frag in forbidden_fragments)
+    ]
+    assert offenders == [], (
+        "logging.py must not import adapters/evaluation/tracking/context/core/ports; "
+        f"forbidden imports found: {offenders}"
+    )
+
+
 def test_ports_storage_does_not_import_concrete_adapter():
     # The L1 port defines only the protocol; the concrete class must have moved
     # out of ports/storage.py.

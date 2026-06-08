@@ -319,3 +319,84 @@ def test_entity_lookup_round_trip_through_public_surface(in_memory_store):
         assert ctx.get_config_entity("widgets", "exp-one") is None
     finally:
         core.close()
+
+
+# --- Story 4.1: end-to-end redacted diagnostic logging (qs-06 reuse) ---------
+
+_LOG_CONFIG = {
+    "account_id": "100123",
+    "project": {"id": "200456", "key": "proj-key"},
+    "experiences": [
+        {
+            "id": "e2",
+            "key": "us-experience",
+            "variations": [{"id": "v3", "key": "only", "traffic_allocation": 100.0}],
+        }
+    ],
+    "features": [],
+    "goals": [{"id": "g1", "key": "signup"}],
+    "audiences": [],
+    "segments": [],
+}
+
+_LOG_PII = {"email": "user@co.com", "name": "Jane", "plan": "pro"}
+
+
+def test_direct_config_flow_emits_redacted_logs_and_leaks_nothing(
+    in_memory_store, caplog
+):
+    """Story 4.1: an end-to-end direct-config Core -> create_context ->
+    run_experience -> track_conversion flow emits event-oriented diagnostic
+    records (init/eval/tracking) carrying only allowlisted fields, and leaks no
+    PII (raw visitor_id, email, name, attribute dict) at any level."""
+    import logging
+
+    from convert_sdk._internal.redaction import fingerprint_visitor
+    from convert_sdk.events import LifecycleEvent
+
+    visitor = "visitor-int-001"
+    with caplog.at_level(logging.DEBUG, logger="convert_sdk"):
+        core = Core(SDKConfig(data=_LOG_CONFIG, data_store=in_memory_store)).initialize()
+        try:
+            ctx = core.create_context(visitor, visitor_attributes=_LOG_PII)
+            assert ctx.run_experience("us-experience") is not None
+            assert ctx.track_conversion("signup").tracked is True
+        finally:
+            core.close()
+
+    text = "\n".join(r.getMessage() for r in caplog.records if r.name == "convert_sdk")
+    # Event-oriented records across the flows.
+    assert LifecycleEvent.READY.value in text
+    assert LifecycleEvent.BUCKETING.value in text
+    assert LifecycleEvent.CONVERSION.value in text
+    # Allowlisted fields present.
+    assert "us-experience" in text
+    assert "signup" in text
+    assert fingerprint_visitor(visitor) in text
+    # NFR6: no PII leaks.
+    assert visitor not in text
+    assert "user@co.com" not in text
+    assert "Jane" not in text
+    assert "plan" not in text
+
+
+def test_sdk_key_flow_does_not_leak_secret_in_logs(sdk_with_mock_transport, caplog):
+    """Story 4.1 NFR7: the full sdk_key config-fetch + tracking round-trip over
+    the qs-06 RESPX-mocked transport emits diagnostic logs that never contain
+    the raw SDK key or any credential value, at DEBUG level."""
+    import logging
+
+    from .conftest import SDK_KEY
+
+    core = sdk_with_mock_transport
+    with caplog.at_level(logging.DEBUG, logger="convert_sdk"):
+        ctx = core.create_context("visitor-int-002")
+        ctx.track_conversion("signup")
+        core.flush()
+
+    text = "\n".join(r.getMessage() for r in caplog.records if r.name == "convert_sdk")
+    assert SDK_KEY not in text
+    assert "Authorization" not in text
+    assert "Bearer" not in text
+    # The redacted endpoint host may appear, but never with a query string.
+    assert "?" not in text
