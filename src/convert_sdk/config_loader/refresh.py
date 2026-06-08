@@ -192,18 +192,76 @@ class ConfigRefresher:
                 self._cycle_done.set()
 
     def _do_refresh(self) -> None:
-        """Fetch + load + swap one refreshed snapshot.
+        """Fetch + load + swap one refreshed snapshot, with diagnostics.
 
-        Story 5.2 Task 3 extends this with diagnostic events, backoff, and the
-        terminal-failure callback. Task 2 establishes the happy path and the
-        callback dispatch; failure handling here keeps the prior snapshot intact
-        by simply re-raising to the worker's per-cycle boundary (Task 3 replaces
-        the bare propagation with backoff + diagnostics).
+        Emits ``refresh.start`` then, on success, ``refresh.success`` and applies
+        the snapshot through the atomic swap callback; on a transport/config
+        failure it emits ``refresh.fail`` (carrying ``consecutive_failures`` and
+        whether terminal backoff was reached), keeps the prior snapshot intact
+        (AC-3), bumps the backoff counter, and — once the backed-off wait reaches
+        the cap — surfaces the typed error through ``on_terminal_failure``. A
+        background failure NEVER propagates to the worker loop, so it can never
+        crash the host process (Critical Warning #3).
         """
-        raw = self._transport.fetch_config(self._config)
-        snapshot = load_snapshot(raw)
+        log_safe(
+            LifecycleEvent.CONFIG_UPDATED,
+            level=logging.DEBUG,
+            target=self._logger,
+            refresh_phase="start",
+        )
+        try:
+            raw = self._transport.fetch_config(self._config)
+            snapshot = load_snapshot(raw)
+        except Exception as error:  # transport/config failure — never fatal
+            self._handle_failure(error)
+            return
         self._consecutive_failures = 0
+        log_safe(
+            LifecycleEvent.CONFIG_UPDATED,
+            level=logging.DEBUG,
+            target=self._logger,
+            refresh_phase="success",
+        )
         self._on_snapshot(snapshot)
+
+    def _handle_failure(self, error: Exception) -> None:
+        """Record a failed refresh attempt and surface it without crashing.
+
+        Increments the consecutive-failure count (driving exponential backoff),
+        emits ``refresh.fail`` through the diagnostic logger (Story 4.1), and —
+        once the backed-off cadence has reached ``backoff_max_seconds`` (terminal
+        backoff) — invokes ``on_terminal_failure`` with the typed error (Story
+        4.2). A callback that itself raises is caught and logged so it can never
+        crash the daemon thread.
+        """
+        self._consecutive_failures += 1
+        at_terminal = self._at_terminal_backoff()
+        log_safe(
+            LifecycleEvent.CONFIG_UPDATED,
+            level=logging.ERROR,
+            target=self._logger,
+            refresh_phase="fail",
+            consecutive_failures=self._consecutive_failures,
+            at_terminal_backoff=at_terminal,
+        )
+        if at_terminal and self._on_terminal_failure is not None:
+            try:
+                self._on_terminal_failure(error)
+            except Exception:
+                # A host callback that blows up must not kill the worker.
+                log_safe(
+                    LifecycleEvent.CONFIG_UPDATED,
+                    level=logging.ERROR,
+                    target=self._logger,
+                    refresh_phase="terminal_callback_error",
+                )
+
+    def _at_terminal_backoff(self) -> bool:
+        """True once the backed-off wait has reached the ``backoff_max_seconds`` cap."""
+        backed_off = self._policy.interval_seconds * (
+            self._policy.backoff_factor ** self._consecutive_failures
+        )
+        return backed_off >= self._policy.backoff_max_seconds
 
     def _next_wait_seconds(self) -> float:
         """Compute the next interruptible-wait duration (interval + jitter).
