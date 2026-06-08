@@ -104,6 +104,7 @@ def create_conversion(
     revenue: Optional[float] = None,
     conversion_data: Optional[Mapping[str, Any]] = None,
     visitor_attributes: Optional[Mapping[str, Any]] = None,
+    default_segments: Optional[Mapping[str, Any]] = None,
 ) -> ConversionResult:
     """Create an in-process conversion event for ``goal_key`` and ``visitor_id``.
 
@@ -157,7 +158,18 @@ def create_conversion(
     bucketing_assignments = _compute_bucketing_assignments(
         snapshot, visitor_id=visitor_id, visitor_attributes=visitor_attributes
     )
-    segments = dict(visitor_attributes) if visitor_attributes else None
+    # Attribution segments: the visitor's attributes provide the legacy
+    # attribute-derived segments; the visitor's associated DEFAULT segments
+    # (Story 3.3 / FR14) are layered on top so the wire ``segments`` field
+    # reflects the active default segments at conversion time. Default segments
+    # are the explicit association, so they win on a key conflict. The serializer
+    # (Story 2.2) filters the merged map to the VisitorSegments allowlist.
+    merged_segments: Dict[str, Any] = {}
+    if visitor_attributes:
+        merged_segments.update(visitor_attributes)
+    if default_segments:
+        merged_segments.update(default_segments)
+    segments = merged_segments or None
 
     event = ConversionEvent(
         visitor_id=visitor_id,
