@@ -474,6 +474,7 @@ class Context:
                 revenue=revenue,
                 conversion_data=conversion_data,
                 visitor_attributes=self._state.visitor_attributes,
+                default_segments=self._state.default_segments,
                 force_multiple=force_multiple,
             )
         # Fallback: stateless create_conversion (no dedup/queue) for a Context
@@ -485,4 +486,5 @@ class Context:
             revenue=revenue,
             conversion_data=conversion_data,
             visitor_attributes=self._state.visitor_attributes,
+            default_segments=self._state.default_segments,
         )

@@ -128,6 +128,7 @@ class Tracker:
         revenue: Optional[float] = None,
         conversion_data: Optional[Mapping[str, Any]] = None,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
+        default_segments: Optional[Mapping[str, Any]] = None,
         force_multiple: bool = False,
     ) -> ConversionResult:
         """Resolve, dedup, and (conditionally) enqueue a conversion.
@@ -136,6 +137,10 @@ class Tracker:
         ``DEDUPLICATED`` on a default-mode duplicate, or ``GOAL_NOT_FOUND`` for
         an unknown goal (preserved unchanged from Story 2.1). Programmer misuse
         in ``conversion_data`` still fails fast via ``create_conversion``.
+
+        ``default_segments`` (Story 3.3 / FR14) are the visitor's active default
+        segments at conversion time; they are passed through to the serializer's
+        ``segments`` payload without changing dedup/queue/flush behavior.
         """
         result = create_conversion(
             self._snapshot,
@@ -144,6 +149,7 @@ class Tracker:
             revenue=revenue,
             conversion_data=conversion_data,
             visitor_attributes=visitor_attributes,
+            default_segments=default_segments,
         )
         # Unknown goal: typed NON-EXCEPTION outcome, never enqueued (FR50).
         if result.status is not ConversionStatus.QUEUED or result.event is None:
