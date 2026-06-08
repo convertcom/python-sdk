@@ -100,6 +100,55 @@ class Context:
         """
         return self._state.visitor_attributes
 
+    # --- mutable visitor state (Story 3.2) ---------------------------------
+
+    def set_attributes(self, attributes: dict[str, Any]) -> None:
+        """Persistently update this visitor's stored attributes (FR11).
+
+        Merges ``attributes`` into the context's stored visitor attributes —
+        new keys override touched keys, untouched keys persist — and REBINDS the
+        context's :class:`~convert_sdk.domain.context_state.ContextState` to the
+        merged immutable copy. The original frozen state is never mutated in
+        place, and the shared immutable ``ConfigSnapshot`` is never touched.
+
+        Subsequent evaluations on this same context
+        (:meth:`run_experience` / :meth:`run_experiences` / :meth:`run_feature`
+        / :meth:`run_features`) use the updated state for
+        audience/segment qualification. Deterministic bucketing inputs (visitor
+        identity + config snapshot) are unaffected (FR25).
+
+        This is the PERSISTENT update. It is distinct from the per-call
+        request-time ``attributes`` overlay accepted by the evaluation methods:
+        the overlay is ephemeral, takes precedence for that single call, and is
+        NEVER written back here. Precedence for a call is request-time overlay >
+        persisted/updated visitor state.
+
+        The updated state is persisted through the injected ``DataStore`` (the
+        same per-``Core`` persistence boundary and visitor-scoped key Story 3.1
+        established) so a later ``create_context(visitor_id)`` for the same
+        visitor rehydrates the update.
+
+        Args:
+            attributes: Visitor attributes to merge into the stored state.
+
+        Returns:
+            ``None``.
+        """
+        self._state = self._state.with_attributes(attributes)
+        self._persist_visitor_state()
+
+    def _persist_visitor_state(self) -> None:
+        """Persist the current visitor state through the injected ``DataStore``.
+
+        No-op when no store is injected (a ``Context`` constructed directly
+        rather than via ``Core``). The write is visitor-scoped: it targets only
+        this visitor's state key, never another visitor's and never a
+        ``Core``-global key. Story 3.2 wires the actual write (SDK-2).
+        """
+        # Implemented in SDK-2 (DataStore persistence). Kept as a seam so the
+        # SDK-1 rebind behavior is independently testable.
+        return None
+
     # --- evaluation surface ------------------------------------------------
 
     def _merge(
