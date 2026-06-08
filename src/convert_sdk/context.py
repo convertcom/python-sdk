@@ -23,9 +23,11 @@ attribute merge).
 
 from __future__ import annotations
 
+import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
+from convert_sdk._internal.redaction import SafeContext, fingerprint_visitor
 from convert_sdk.domain.context_state import ContextState
 from convert_sdk.domain.results import (
     ConversionResult,
@@ -37,6 +39,8 @@ from convert_sdk.evaluation import entity_lookup
 from convert_sdk.evaluation.experiences import select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
 from convert_sdk.evaluation.segments import select_custom_segments
+from convert_sdk.events import LifecycleEvent
+from convert_sdk.logging import log_safe
 from convert_sdk.ports.storage import visitor_state_key
 from convert_sdk.tracking.conversions import create_conversion
 
@@ -289,6 +293,43 @@ class Context:
         )
         return None
 
+    # --- diagnostic logging (Story 4.1) ------------------------------------
+
+    def _log_bucketing(self, result: Optional["ExperienceResult"]) -> None:
+        """Emit an additive, allowlist-only evaluation-decision log record.
+
+        Carries ONLY allowlisted fields (NFR6): the entity key, the bucketed
+        variation key, and a HASHED visitor reference (never the raw
+        ``visitor_id``, never raw visitor attributes). Purely observational — it
+        runs after the evaluation has already produced ``result`` and cannot
+        change the outcome (Critical Warning #6).
+        """
+        if result is None:
+            return
+        log_safe(
+            LifecycleEvent.BUCKETING,
+            level=logging.DEBUG,
+            context=SafeContext(entity_key=result.experience_key),
+            visitor=fingerprint_visitor(self._state.visitor_id),
+            variation_key=result.variation_key,
+        )
+
+    def _log_conversion(self, result: "ConversionResult") -> None:
+        """Emit an additive, allowlist-only conversion-tracking log record.
+
+        Carries ONLY the goal key, the typed outcome, and a hashed visitor
+        reference — never the raw ``conversion_data`` values, revenue payload,
+        raw ``visitor_id``, or visitor attributes (NFR6, Task 4.3). Observational
+        only; runs after the tracking result is produced.
+        """
+        log_safe(
+            LifecycleEvent.CONVERSION,
+            level=logging.DEBUG,
+            context=SafeContext(entity_key=result.goal_key),
+            visitor=fingerprint_visitor(self._state.visitor_id),
+            outcome=result.status.value,
+        )
+
     # --- evaluation surface ------------------------------------------------
 
     def _merge(
@@ -324,13 +365,15 @@ class Context:
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
-        return select_experience(
+        result = select_experience(
             experience_key,
             self._snapshot,
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
         )
+        self._log_bucketing(result)
+        return result
 
     def run_experiences(
         self,
@@ -361,6 +404,7 @@ class Context:
             )
             if result is not None:
                 results.append(result)
+                self._log_bucketing(result)
         return results
 
     # --- feature resolution ------------------------------------------------
@@ -469,7 +513,7 @@ class Context:
         delivery happens at flush time (``Core.flush()``).
         """
         if self._tracker is not None:
-            return self._tracker.track(
+            result = self._tracker.track(
                 visitor_id=self._state.visitor_id,
                 goal_key=goal_key,
                 revenue=revenue,
@@ -478,17 +522,20 @@ class Context:
                 default_segments=self._state.default_segments,
                 force_multiple=force_multiple,
             )
-        # Fallback: stateless create_conversion (no dedup/queue) for a Context
-        # constructed without a shared tracker.
-        return create_conversion(
-            self._snapshot,
-            visitor_id=self._state.visitor_id,
-            goal_key=goal_key,
-            revenue=revenue,
-            conversion_data=conversion_data,
-            visitor_attributes=self._state.visitor_attributes,
-            default_segments=self._state.default_segments,
-        )
+        else:
+            # Fallback: stateless create_conversion (no dedup/queue) for a
+            # Context constructed without a shared tracker.
+            result = create_conversion(
+                self._snapshot,
+                visitor_id=self._state.visitor_id,
+                goal_key=goal_key,
+                revenue=revenue,
+                conversion_data=conversion_data,
+                visitor_attributes=self._state.visitor_attributes,
+                default_segments=self._state.default_segments,
+            )
+        self._log_conversion(result)
+        return result
 
     # --- entity lookup (Story 3.4 / FR28) ----------------------------------
 

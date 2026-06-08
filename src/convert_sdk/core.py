@@ -13,6 +13,7 @@ later stories. The public API is sync-first for MVP.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
 from convert_sdk.config import SDKConfig
@@ -21,9 +22,11 @@ from convert_sdk.context import Context
 from convert_sdk.domain.config_snapshot import ConfigSnapshot
 from convert_sdk.ports.storage import visitor_state_key
 
+from convert_sdk._internal.redaction import SafeContext, redact_url
 from convert_sdk.adapters.events.in_process import InProcessEventBus
 from convert_sdk.adapters.storage.in_memory import InMemoryDataStore
 from convert_sdk.events import LifecycleEvent
+from convert_sdk.logging import log_safe
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.ports.event_bus import EventBus, EventHandler
@@ -227,11 +230,40 @@ class Core:
                 non-HTTPS base URL — though that is enforced earlier, at
                 ``TransportConfig`` construction).
         """
-        raw = self._load_raw_config()
-        # load_snapshot validates + normalizes; any failure leaves us not-ready.
-        self._snapshot = load_snapshot(raw)
+        # Additive diagnostic logging (Story 4.1): emit a config-load START
+        # milestone, then a SUCCESS milestone carrying the config version, or a
+        # FAILURE record on any load error. This wraps the existing init flow at
+        # the orchestration seam WITHOUT changing its control flow or readiness
+        # contract (Critical Warning #6) — a logging failure can never alter
+        # initialization, and the original exception is always re-raised.
+        endpoint = None if self._config.is_direct_config else self._config.transport.base_url
+        log_safe(
+            LifecycleEvent.CONFIG_UPDATED,
+            level=logging.DEBUG,
+            target=self._config.logger,
+            context=SafeContext(endpoint=redact_url(endpoint)),
+        )
+        try:
+            raw = self._load_raw_config()
+            # load_snapshot validates + normalizes; any failure leaves us not-ready.
+            self._snapshot = load_snapshot(raw)
+        except Exception as error:  # noqa: BLE001 - log then re-raise unchanged
+            status = getattr(error, "status_code", None)
+            log_safe(
+                LifecycleEvent.CONFIG_UPDATED,
+                level=logging.ERROR,
+                target=self._config.logger,
+                context=SafeContext(endpoint=redact_url(endpoint), status_code=status),
+            )
+            raise
         self._build_tracker()
         self._ready = True
+        log_safe(
+            LifecycleEvent.READY,
+            level=logging.INFO,
+            target=self._config.logger,
+            context=SafeContext(config_version=self._snapshot.project_id),
+        )
         return self
 
     def _build_tracker(self) -> None:
