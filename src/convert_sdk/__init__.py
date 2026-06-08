@@ -17,7 +17,7 @@ Story 1.1 boundary.
 """
 
 from convert_sdk.adapters.storage.in_memory import InMemoryDataStore
-from convert_sdk.config import SDKConfig, TransportConfig
+from convert_sdk.config import RefreshConfig, SDKConfig, TransportConfig
 from convert_sdk.context import Context
 from convert_sdk.core import Core
 from convert_sdk.domain.results import (
@@ -53,6 +53,8 @@ __all__ = [  # noqa: RUF022 - grouped by story for readability, not alphabetized
     # Story 1.2 initialization config.
     "SDKConfig",
     "TransportConfig",
+    # Story 5.2 opt-in automatic config-refresh policy (FR31, post-MVP).
+    "RefreshConfig",
     # Story 1.2 typed error hierarchy.
     "ConvertSDKError",
     "ConfigError",
