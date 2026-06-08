@@ -26,7 +26,28 @@ it. ``tracking/`` talks to storage ONLY through this protocol (Critical Warning
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional, Protocol, runtime_checkable
+
+# Namespacing prefix for the per-visitor persisted ``ContextState`` key. Mirrors
+# the ``dedup:`` namespacing in ``tracking/deduplication.py`` so the visitor
+# state, deduplication markers, and any future DataStore consumer never collide
+# in the shared single-per-Core store (Story 3.2).
+_VISITOR_STATE_PREFIX = "state"
+
+
+def visitor_state_key(visitor_id: str) -> str:
+    """Build the DataStore key for a visitor's persisted ``ContextState``.
+
+    Uses a collision-safe namespaced key
+    ``f"state:{json.dumps([visitor_id])}"`` — JSON serialization guarantees no
+    collision regardless of separator characters in ``visitor_id`` and keeps the
+    derivation stdlib-only (no new dependency), consistent with
+    :func:`convert_sdk.tracking.deduplication.goal_marker_key`. The key encodes
+    ONLY this visitor's identity so writes/reads stay strictly visitor-scoped
+    (never another visitor's state, never Core-global state).
+    """
+    return f"{_VISITOR_STATE_PREFIX}:{json.dumps([visitor_id])}"
 
 
 @runtime_checkable
