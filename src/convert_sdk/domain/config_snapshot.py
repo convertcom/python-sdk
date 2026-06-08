@@ -69,6 +69,20 @@ class ConfigSnapshot:
     _goals_by_key: Mapping[str, Any] = field(
         default_factory=dict, repr=False, compare=False
     )
+    # Story 3.4 (SDK-1): goal-by-id + segment-by-key/by-id indexes so the
+    # read-only entity-lookup surface (FR28) resolves these parity-critical
+    # entity types in O(1) over the immutable snapshot. Built once here at
+    # construction alongside the existing indexes — never rebuilt per lookup,
+    # never a second/parallel mutable index.
+    _goals_by_id: Mapping[str, Any] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _segments_by_key: Mapping[str, Any] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _segments_by_id: Mapping[str, Any] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -94,6 +108,16 @@ class ConfigSnapshot:
         # scanning raw config (Critical Warning #4 / FR35).
         object.__setattr__(
             self, "_goals_by_key", MappingProxyType(_index_by(self.goals, "key"))
+        )
+        # Story 3.4 (SDK-1): by-id for goals; by-key + by-id for segments.
+        object.__setattr__(
+            self, "_goals_by_id", MappingProxyType(_index_by(self.goals, "id"))
+        )
+        object.__setattr__(
+            self, "_segments_by_key", MappingProxyType(_index_by(self.segments, "key"))
+        )
+        object.__setattr__(
+            self, "_segments_by_id", MappingProxyType(_index_by(self.segments, "id"))
         )
 
     @classmethod
@@ -149,3 +173,19 @@ class ConfigSnapshot:
         ``None`` is the normal diagnosable miss path (FR50), not an error.
         """
         return self._goals_by_key.get(key)
+
+    def get_goal_by_id(self, goal_id: str) -> Optional[Mapping[str, Any]]:
+        """Resolve a goal definition by its id, or ``None`` if absent (Story 3.4).
+
+        Read-only accessor (never raises) over the by-id index built once at
+        construction, used by the by-id entity-lookup surface.
+        """
+        return self._goals_by_id.get(goal_id)
+
+    def get_segment_by_key(self, key: str) -> Optional[Mapping[str, Any]]:
+        """Resolve a segment definition by its key, or ``None`` if absent (Story 3.4)."""
+        return self._segments_by_key.get(key)
+
+    def get_segment_by_id(self, segment_id: str) -> Optional[Mapping[str, Any]]:
+        """Resolve a segment definition by its id, or ``None`` if absent (Story 3.4)."""
+        return self._segments_by_id.get(segment_id)
