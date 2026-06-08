@@ -151,6 +151,84 @@ def test_tracking_guide_queues_and_deduplicates():
     assert saw_dedup, "tracking guide must show a real deduplicated conversion"
 
 
+# --- DOC-2: debugging, extending, support-workflows guides -------------------
+
+
+@pytest.mark.parametrize("name", DOC2_GUIDES)
+def test_doc2_guide_exists(name):
+    assert (DOCS_DIR / name).is_file(), f"missing guide: docs/{name}"
+
+
+@pytest.mark.parametrize("name", DOC2_GUIDES)
+def test_doc2_guide_samples_execute(name):
+    text = (DOCS_DIR / name).read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    assert samples, f"docs/{name} has no executable (# doctest: run) sample"
+    for body in samples:
+        _run_sample(body)
+
+
+def test_debugging_guide_shows_closed_reason_codes():
+    """The debugging guide must surface real DiagnosticReason codes from the
+    diagnose_* surface — both a RESOLVED and a not-found outcome."""
+    text = (DOCS_DIR / "debugging.md").read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    assert samples, "debugging guide must have an executable sample"
+    saw_resolved = saw_miss = False
+    for body in samples:
+        ns = _run_sample(body)
+        if ns.get("_doc_diag_resolved") == "resolved":
+            saw_resolved = True
+        if ns.get("_doc_diag_miss") in {
+            "experience_not_found",
+            "feature_not_found",
+            "goal_not_found",
+            "entity_not_found",
+        }:
+            saw_miss = True
+    assert saw_resolved, "debugging guide must show a RESOLVED diagnostic"
+    assert saw_miss, "debugging guide must show a not-found DiagnosticReason"
+
+
+def test_debugging_guide_documents_hashed_visitor_not_raw():
+    """The diagnostic surface fingerprints the visitor — the guide must say so
+    and must not imply the raw visitor id is logged."""
+    text = (DOCS_DIR / "debugging.md").read_text(encoding="utf-8").lower()
+    assert "fingerprint" in text or "hashed" in text or "visitor_ref" in text, (
+        "debugging guide must document that the visitor reference is hashed"
+    )
+
+
+def test_extending_guide_injects_custom_protocol_implementations():
+    """The extending guide must show a working custom Transport injected via the
+    keyword-only transport= arg and a custom DataStore via SDKConfig.data_store."""
+    text = (DOCS_DIR / "extending.md").read_text(encoding="utf-8")
+    samples = _extract_python_samples(text)
+    assert samples, "extending guide must have an executable sample"
+    saw_transport = saw_store = False
+    for body in samples:
+        ns = _run_sample(body)
+        if ns.get("_doc_custom_transport_used") is True:
+            saw_transport = True
+        if ns.get("_doc_custom_store_used") is True:
+            saw_store = True
+    assert saw_transport, "extending guide must inject a custom Transport"
+    assert saw_store, "extending guide must inject a custom DataStore via data_store"
+
+
+def test_extending_guide_does_not_invent_a_logger_protocol():
+    """stdlib logging is the seam — there is no ports/logger.py Protocol."""
+    text = (DOCS_DIR / "extending.md").read_text(encoding="utf-8")
+    assert "ports/logger.py" not in text
+    assert "Logger Protocol" not in text and "LoggerProtocol" not in text
+
+
+def test_extending_guide_lists_the_real_protocol_seams():
+    text = (DOCS_DIR / "extending.md").read_text(encoding="utf-8")
+    for seam in ("ports/transport.py", "ports/storage.py", "ports/event_bus.py"):
+        assert seam in text, f"extending guide must reference {seam}"
+
+
 # --- Secret-handling guard across the entire docs set ------------------------
 
 _LITERAL_KEY = re.compile(r"""sdk_key\s*=\s*['"]([^'"]+)['"]""")
