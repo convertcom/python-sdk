@@ -28,16 +28,56 @@ message enrichment is Story 4.2).
 
 from __future__ import annotations
 
-from typing import Optional
+from types import MappingProxyType
+from typing import Any, Mapping, Optional
 
 # Single source of redaction logic (qs-08): errors.py (L0) is permitted to
 # import the L0 leaf ``_internal/`` utilities. Story 4.1 Task 3 replaces the
-# former inline ``_redact_key``/``_redact_url`` shim with this primitive.
+# former inline ``_redact_key``/``_redact_url`` shim with this primitive; Story
+# 4.2 additionally formats the typed ``SafeContext`` carrier through the SAME
+# module so there is exactly ONE redaction implementation (Critical Warning #3).
+from convert_sdk._internal.redaction import SafeContext
 from convert_sdk._internal.redaction import redact_url as _redact_url
+
+# Empty, shared read-only context for errors raised without operational context.
+_EMPTY_CONTEXT: Mapping[str, Any] = MappingProxyType({})
 
 
 class ConvertSDKError(Exception):
-    """Root for every error raised by the Convert Python SDK."""
+    """Root for every error raised by the Convert Python SDK.
+
+    Story 4.2 (FR49) gives every SDK error two diagnosable, privacy-safe
+    carriers so callers and support tooling can branch on the failure WITHOUT
+    parsing the message string:
+
+    * :attr:`code` — a short, stable failure-category string (or ``None``).
+    * :attr:`context` — a read-only mapping of allowlist-only operational fields.
+
+    The ``context`` is built from a :class:`~convert_sdk._internal.redaction.SafeContext`,
+    which physically cannot hold a raw secret or PII field (it carries only the
+    six qs-08-approved operational fields). Because redaction is applied at
+    construction time (Critical Warning #3), neither :meth:`__str__` nor
+    :meth:`__repr__` can leak an SDK key, auth header, raw attribute, or a full
+    URL with its query string.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        code: Optional[str] = None,
+        context: Optional[SafeContext] = None,
+    ) -> None:
+        super().__init__(*args)
+        self.code = code
+        # Render the SafeContext to its allowlist-only field mapping and freeze
+        # it read-only. A SafeContext can only carry approved operational fields,
+        # so the stored ``context`` is structurally PII/secret-free.
+        if context is not None:
+            self.context: Mapping[str, Any] = MappingProxyType(
+                dict(context.as_log_fields())
+            )
+        else:
+            self.context = _EMPTY_CONTEXT
 
 
 class ConfigError(ConvertSDKError):
@@ -66,6 +106,7 @@ class ConfigLoadError(ConfigError):
         *,
         endpoint: Optional[str] = None,
         status_code: Optional[int] = None,
+        config_version: Optional[str] = None,
     ) -> None:
         self.endpoint = _redact_url(endpoint)
         self.status_code = status_code
@@ -75,7 +116,18 @@ class ConfigLoadError(ConfigError):
         if self.status_code is not None:
             detail_parts.append(f"status={self.status_code}")
         detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
-        super().__init__(f"{message}{detail}")
+        # Story 4.2: also expose the safe context via the FR49 carriers. The
+        # SafeContext takes the ALREADY-redacted endpoint (no double-encoding)
+        # and only allowlisted operational fields — never a raw URL/key.
+        super().__init__(
+            f"{message}{detail}",
+            code="config_load_failed",
+            context=SafeContext(
+                endpoint=self.endpoint,
+                status_code=status_code,
+                config_version=config_version,
+            ),
+        )
 
 
 class TransportError(ConvertSDKError):
@@ -110,16 +162,36 @@ class TrackingDeliveryError(ConvertSDKError):
         *,
         endpoint: Optional[str] = None,
         status_code: Optional[int] = None,
+        batch_size: Optional[int] = None,
+        retry_count: Optional[int] = None,
     ) -> None:
         self.endpoint = _redact_url(endpoint)
         self.status_code = status_code
+        self.batch_size = batch_size
+        self.retry_count = retry_count
         detail_parts = []
         if self.endpoint is not None:
             detail_parts.append(f"endpoint={self.endpoint}")
         if self.status_code is not None:
             detail_parts.append(f"status={self.status_code}")
+        if batch_size is not None:
+            detail_parts.append(f"batch_size={batch_size}")
+        if retry_count is not None:
+            detail_parts.append(f"retry={retry_count}")
         detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
-        super().__init__(f"{message}{detail}")
+        # Story 4.2 FR49 carriers: only the already-redacted endpoint and
+        # allowlisted operational counts (batch size + retry count) — never the
+        # SDK key, auth header, or raw response body (NFR23/NFR7).
+        super().__init__(
+            f"{message}{detail}",
+            code="tracking_delivery_failed",
+            context=SafeContext(
+                endpoint=self.endpoint,
+                status_code=status_code,
+                batch_size=batch_size,
+                retry_count=retry_count,
+            ),
+        )
 
 
 class TrackingError(ConvertSDKError):
