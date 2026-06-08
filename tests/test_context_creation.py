@@ -338,8 +338,9 @@ def test_set_attributes_persists_through_injected_store():
     state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
     assert len(state_keys) == 1
     persisted = store.get(state_keys[0])
-    # The persisted value is the merged plain attribute dict.
-    assert dict(persisted) == {"country": "US", "tier": "gold"}
+    # The persisted value is a structured envelope carrying the merged
+    # attributes (Story 3.3 extends the serialized shape to round-trip segments).
+    assert dict(persisted["attributes"]) == {"country": "US", "tier": "gold"}
 
 
 def test_set_attributes_is_visitor_scoped_does_not_clobber_other_visitor():
@@ -463,4 +464,119 @@ def test_overlay_takes_precedence_for_call_but_is_not_persisted():
     assert ctx.run_experience("us-experience") is None
     # And the store still holds only the persisted "DE", never the overlay "US".
     state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
-    assert dict(store.get(state_keys[0])) == {"country": "DE"}
+    assert dict(store.get(state_keys[0])["attributes"]) == {"country": "DE"}
+
+
+# --- Story 3.3 AC #1/#3: set_segments association + persist + rehydrate ------
+
+
+def test_set_segments_returns_none_and_records_into_distinct_field():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1", visitor_attributes={"country": "US"})
+    result = ctx.set_segments({"browser": "chrome"})
+    # set_segments returns None (PRD signature).
+    assert result is None
+    # Recorded into the DISTINCT default_segments field, NOT visitor_attributes.
+    assert dict(ctx.default_segments) == {"browser": "chrome"}
+    assert dict(ctx.visitor_attributes) == {"country": "US"}
+
+
+def test_set_segments_merges_new_keys_over_existing():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1")
+    ctx.set_segments({"browser": "chrome", "country": "DE"})
+    ctx.set_segments({"country": "US"})
+    # Shallow-merge parity: new keys override, untouched keys persist.
+    assert dict(ctx.default_segments) == {"browser": "chrome", "country": "US"}
+
+
+def test_set_segments_rebinds_state_without_in_place_mutation():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1")
+    before = ctx._state  # noqa: SLF001 — internal state under test
+    ctx.set_segments({"browser": "chrome"})
+    # A NEW ContextState is bound; the old frozen instance is untouched.
+    assert ctx._state is not before  # noqa: SLF001
+    assert dict(before.default_segments) == {}
+
+
+def test_set_segments_persists_structured_envelope_through_store():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a", visitor_attributes={"country": "US"})
+    ctx.set_segments({"browser": "chrome"})
+
+    state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    assert len(state_keys) == 1
+    persisted = store.get(state_keys[0])
+    # The persisted envelope round-trips BOTH attributes and segments.
+    assert dict(persisted["attributes"]) == {"country": "US"}
+    assert dict(persisted["segments"]) == {"browser": "chrome"}
+
+
+def test_set_segments_is_visitor_scoped_does_not_clobber_other_visitor():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx_a = core.create_context("v_a")
+    ctx_b = core.create_context("v_b")
+    ctx_a.set_segments({"browser": "chrome"})
+    # ctx_b's in-memory segment state is unaffected (AC #3).
+    assert dict(ctx_b.default_segments) == {}
+    a_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    b_keys = [k for k in store._d if k.startswith("state:") and "v_b" in k]
+    assert len(a_keys) == 1
+    assert b_keys == []
+
+
+def test_fresh_create_context_rehydrates_persisted_segments():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a", visitor_attributes={"country": "US"})
+    ctx.set_segments({"browser": "chrome"})
+
+    # A freshly created context for the SAME visitor reflects the persisted
+    # segment update, rehydrated through the same DataStore + key (AC #1, #3).
+    ctx2 = core.create_context("v_a")
+    assert dict(ctx2.default_segments) == {"browser": "chrome"}
+    # Attributes still rehydrate too (the envelope round-trips both).
+    assert dict(ctx2.visitor_attributes) == {"country": "US"}
+
+
+def test_set_attributes_and_set_segments_coexist_in_envelope():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a")
+    ctx.set_attributes({"country": "US"})
+    ctx.set_segments({"browser": "chrome"})
+    ctx2 = core.create_context("v_a")
+    assert dict(ctx2.visitor_attributes) == {"country": "US"}
+    assert dict(ctx2.default_segments) == {"browser": "chrome"}
+
+
+def test_legacy_plain_attributes_dict_still_hydrates_attributes_only():
+    # Backward compatibility: a store holding the Story 3.2 plain-attributes dict
+    # (no envelope) hydrates as attributes-only with empty segments.
+    store = _RecordingStore()
+    from convert_sdk.ports.storage import visitor_state_key
+
+    store.set(visitor_state_key("v_legacy"), {"country": "US"})
+    core = _store_core(store)
+    ctx = core.create_context("v_legacy")
+    assert dict(ctx.visitor_attributes) == {"country": "US"}
+    assert dict(ctx.default_segments) == {}
+
+
+def test_set_segments_without_store_is_safe_noop_persist():
+    core = Core(SDKConfig(data=CONFIG)).initialize()
+    ctx = Context("v_a", core.current_config)
+    ctx.set_segments({"browser": "chrome"})
+    # Rebinds in-memory without raising; persistence is simply skipped.
+    assert dict(ctx.default_segments) == {"browser": "chrome"}
+
+
+def test_default_segments_property_is_read_only_view():
+    core = _ready_core()
+    ctx = core.create_context("visitor-1")
+    ctx.set_segments({"browser": "chrome"})
+    with pytest.raises(TypeError):
+        ctx.default_segments["browser"] = "firefox"  # type: ignore[index]
