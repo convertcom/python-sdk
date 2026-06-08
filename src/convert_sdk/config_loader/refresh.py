@@ -125,11 +125,22 @@ class ConfigRefresher:
         thread.start()
 
     def stop(self, *, timeout: float = 5.0) -> None:
-        """Signal the worker to stop and join the thread (idempotent)."""
+        """Signal the worker to stop and join the thread (idempotent).
+
+        Safe to call re-entrantly from the worker thread itself (e.g. if a host's
+        terminal-failure callback calls ``Core.close()``): a thread cannot join
+        itself, so the self-join is skipped — the daemon loop observes the
+        ``_stopping`` flag and exits on its own. The thread is a daemon, so even
+        an un-joined worker never blocks interpreter exit.
+        """
         self._stopping.set()
         self._wake.set()
         thread = self._thread
-        if thread is not None and thread.is_alive():
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
             thread.join(timeout=timeout)
         self._thread = None
 
@@ -177,7 +188,7 @@ class ConfigRefresher:
                 break
             try:
                 self._do_refresh()
-            except Exception:  # pragma: no cover - defended; see Task 3 guard
+            except Exception:
                 # Outer resilience guard. _do_refresh handles its own transport
                 # failures (Task 3); reaching here means a logging/clock/callback
                 # subsystem failure escaped. Emit and keep the worker alive.
