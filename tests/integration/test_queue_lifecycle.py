@@ -191,3 +191,127 @@ def test_delivered_payload_matches_story_2_2_serializer(
     ).event
     expected = build_tracking_payload(snap, event, data_store=None)
     assert delivered == expected
+
+
+# --- Story 2.4: per-trigger QUEUE_RELEASED reason (qs-07 matrix) -----------
+
+
+def test_explicit_flush_emits_queue_released_reason_explicit(
+    sdk_with_mock_transport, mock_tracking_endpoint
+):
+    from convert_sdk.events import LifecycleEvent
+
+    core = sdk_with_mock_transport
+    seen = []
+    core.on(LifecycleEvent.API_QUEUE_RELEASED, lambda p, error=None: seen.append(p))
+    core.create_context("v1").track_conversion("purchase_completed")
+    core.flush()
+    assert len(seen) == 1
+    assert seen[0].reason.value == "explicit"
+
+
+def test_batch_size_release_emits_queue_released_reason_size(
+    respx_mock, mock_config_endpoint, mock_tracking_endpoint
+):
+    from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
+    from convert_sdk.config import SDKConfig, TransportConfig
+    from convert_sdk.core import Core
+    from convert_sdk.events import LifecycleEvent
+
+    from .conftest import MOCK_BASE_URL
+
+    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    core = Core(
+        SDKConfig(
+            sdk_key=SDK_KEY,
+            batch_size=2,
+            transport=TransportConfig(base_url=MOCK_BASE_URL),
+        ),
+        transport=transport,
+    ).initialize()
+    seen = []
+    core.on(LifecycleEvent.API_QUEUE_RELEASED, lambda p, error=None: seen.append(p))
+    try:
+        ctx = core.create_context("v1")
+        ctx.track_conversion("purchase_completed")
+        ctx.track_conversion("signup")  # reaches batch_size -> size release
+        assert len(seen) == 1
+        assert seen[0].reason.value == "size"
+    finally:
+        core.close()
+
+
+def test_timer_release_emits_queue_released_reason_timeout(
+    respx_mock, mock_config_endpoint, mock_tracking_endpoint
+):
+    from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
+    from convert_sdk.config import SDKConfig, TransportConfig
+    from convert_sdk.core import Core
+    from convert_sdk.events import LifecycleEvent
+
+    from .conftest import MOCK_BASE_URL
+
+    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    core = Core(
+        SDKConfig(
+            sdk_key=SDK_KEY,
+            auto_flush_interval_ms=50,
+            transport=TransportConfig(base_url=MOCK_BASE_URL),
+        ),
+        transport=transport,
+    ).initialize()
+    seen = []
+    core.on(LifecycleEvent.API_QUEUE_RELEASED, lambda p, error=None: seen.append(p))
+    try:
+        core.create_context("v1").track_conversion("purchase_completed")
+        deadline = time.time() + 3.0
+        while not seen and time.time() < deadline:
+            time.sleep(0.02)
+        assert seen, "timer-based release did not emit QUEUE_RELEASED"
+        assert seen[0].reason.value == "timeout"
+    finally:
+        core.close()
+
+
+def test_atexit_release_emits_queue_released_reason_atexit(
+    sdk_with_mock_transport, mock_tracking_endpoint
+):
+    import atexit as _atexit
+
+    from convert_sdk.events import LifecycleEvent
+    from convert_sdk.tracking.flush import register_atexit_flush
+
+    core = sdk_with_mock_transport
+    seen = []
+    core.on(LifecycleEvent.API_QUEUE_RELEASED, lambda p, error=None: seen.append(p))
+    core.create_context("v1").track_conversion("purchase_completed")
+
+    # A Flushable whose flush() drives the tracker's ATEXIT release path so the
+    # best-effort atexit hook reports ReleaseReason.ATEXIT on its event (driven
+    # in-process here so the emitted payload can be captured without relying on
+    # interpreter shutdown).
+    class _AtexitFlushable:
+        def flush(self_inner):
+            core._tracker.flush_atexit()  # type: ignore[attr-defined]
+
+    cb = register_atexit_flush(_AtexitFlushable())
+    try:
+        cb()
+        assert len(seen) == 1
+        assert seen[0].reason.value == "atexit"
+    finally:
+        _atexit.unregister(cb)
+
+
+def test_never_flushed_emits_nothing_and_does_not_crash(
+    sdk_with_mock_transport, mock_tracking_endpoint
+):
+    from convert_sdk.events import LifecycleEvent
+
+    core = sdk_with_mock_transport
+    seen = []
+    core.on(LifecycleEvent.API_QUEUE_RELEASED, lambda p, error=None: seen.append(p))
+    # Track but never flush -> no release occurred -> no emission, no crash.
+    core.create_context("v1").track_conversion("purchase_completed")
+    assert seen == []
+    assert mock_tracking_endpoint.call_count == 0

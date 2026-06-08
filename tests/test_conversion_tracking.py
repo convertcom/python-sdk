@@ -288,3 +288,79 @@ def test_goal_not_found_does_not_enqueue():
     ctx.track_conversion("ghost_goal")
     # Nothing queued -> flush is a no-op (no transport configured for direct cfg).
     core.flush()
+
+
+# --- Story 2.4: CONVERSION lifecycle emission on the enqueue path ----------
+
+
+def _core_with_conversion_listener():
+    """A Core plus a list capturing every CONVERSION payload it emits."""
+    from convert_sdk import LifecycleEvent
+
+    core = _core_with_two_goals()
+    received = []
+    core.on(
+        LifecycleEvent.CONVERSION,
+        lambda payload, error=None: received.append(payload),
+    )
+    return core, received
+
+
+def test_conversion_event_fires_once_on_tracked_enqueue():
+    from convert_sdk.events import ConversionEventPayload
+
+    core, received = _core_with_conversion_listener()
+    core.create_context("visitor-1").track_conversion("purchase_completed")
+
+    assert len(received) == 1
+    payload = received[0]
+    assert isinstance(payload, ConversionEventPayload)
+    assert payload.visitor_id == "visitor-1"
+    assert payload.goal_id == "g1"
+    assert payload.goal_key == "purchase_completed"
+
+
+def test_conversion_event_does_not_fire_on_deduplicated_suppression():
+    core, received = _core_with_conversion_listener()
+    ctx = core.create_context("visitor-1")
+    ctx.track_conversion("purchase_completed")  # tracked -> 1 emission
+    second = ctx.track_conversion("purchase_completed")  # default-mode duplicate
+
+    assert second.status is ConversionStatus.DEDUPLICATED
+    # The suppressed duplicate must NOT emit a second CONVERSION (AC #4).
+    assert len(received) == 1
+
+
+def test_conversion_event_does_not_fire_on_goal_not_found():
+    core, received = _core_with_conversion_listener()
+    result = core.create_context("visitor-1").track_conversion("ghost_goal")
+
+    assert result.status is ConversionStatus.GOAL_NOT_FOUND
+    # An unknown goal is a typed no-result, not a state transition (AC #4).
+    assert received == []
+
+
+def test_force_multiple_retrack_emits_conversion_again():
+    # A forced repeat re-enqueues only when there is something to send (goalData,
+    # e.g. revenue) — the transaction path. Each actual enqueue emits exactly one
+    # CONVERSION (events reflect real enqueues, not no-op calls).
+    core, received = _core_with_conversion_listener()
+    ctx = core.create_context("visitor-1")
+    ctx.track_conversion("purchase_completed", revenue=10.0)  # 1 (enqueued)
+    ctx.track_conversion(
+        "purchase_completed", revenue=20.0, force_multiple=True
+    )  # 2 (re-enqueued transaction)
+    assert len(received) == 2
+
+
+def test_tracking_behaves_identically_with_and_without_subscribers():
+    # NFR5 / AC #5: emission is a no-op when no handler is registered, so the
+    # tracked outcome is identical with or without subscribers.
+    core_no_sub = _core_with_two_goals()
+    r1 = core_no_sub.create_context("v1").track_conversion("purchase_completed")
+
+    core_sub, received = _core_with_conversion_listener()
+    r2 = core_sub.create_context("v1").track_conversion("purchase_completed")
+
+    assert r1.status is r2.status is ConversionStatus.QUEUED
+    assert len(received) == 1  # subscriber observed it; outcome unchanged
