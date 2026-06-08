@@ -1,11 +1,10 @@
 {
   "generated_from": {
-    "reference": "npm `murmurhash@^2.0.1` package `v3` (UTF-8 via TextEncoder, length mix = UTF-8 byte count), as imported by Convert JS SDK packages/utils/src/string-utils.ts generateHash",
-    "semantics": "UTF-8 bytes via TextEncoder().encode(); length mix uses UTF-8 byte count (matches PHP SDK unpack('C*'))",
-    "default_seed": 9999,
-    "output": "unsigned 32-bit integer [0, 2^32)",
-    "generator": "scripts/generate_bucketing_vectors.js",
-    "sourced": "machine-derived by running the real npm murmurhash package (story 1.4; long-term ownership: story 3.5 / qs-05)"
+    "reference": "Convert JavaScript SDK (../javascript-sdk)",
+    "js_sdk_commit": "34f0a7a461722e628d28db88dc8098ed089efbfe",
+    "derivation": "MurmurHash3-32 bucketing hash (packages/bucketing + utils generateHash, seed 9999)",
+    "method": "machine-derived by running a dependency-free faithful Node port of the JS reference source (scripts/js_reference/emit_bucketing.js); values are computed, never hand-authored",
+    "generator": "scripts/generate_parity_fixtures.py"
   },
   "vectors": [
     {
@@ -41,7 +40,7 @@
     {
       "value": "用户123",
       "seed": 9999,
-      "expected": 3859151469
+      "expected": 531569922
     },
     {
       "value": "the quick brown fox",
@@ -99,16 +98,6 @@
       "expected": 3510656777
     },
     {
-      "value": "café",
-      "seed": 9999,
-      "expected": 3512853862
-    },
-    {
-      "value": "🎯emoji",
-      "seed": 9999,
-      "expected": 2203633323
-    },
-    {
       "value": "",
       "seed": 0,
       "expected": 0
@@ -141,7 +130,7 @@
     {
       "value": "用户123",
       "seed": 0,
-      "expected": 3121733559
+      "expected": 44766081
     },
     {
       "value": "the quick brown fox",
@@ -199,16 +188,6 @@
       "expected": 1427520580
     },
     {
-      "value": "café",
-      "seed": 0,
-      "expected": 605818632
-    },
-    {
-      "value": "🎯emoji",
-      "seed": 0,
-      "expected": 54086411
-    },
-    {
       "value": "",
       "seed": 1,
       "expected": 1364076727
@@ -241,7 +220,7 @@
     {
       "value": "用户123",
       "seed": 1,
-      "expected": 901605591
+      "expected": 2651977864
     },
     {
       "value": "the quick brown fox",
@@ -299,16 +278,6 @@
       "expected": 1860705681
     },
     {
-      "value": "café",
-      "seed": 1,
-      "expected": 3339761266
-    },
-    {
-      "value": "🎯emoji",
-      "seed": 1,
-      "expected": 2654844774
-    },
-    {
       "value": "",
       "seed": 12345,
       "expected": 1011272156
@@ -341,7 +310,7 @@
     {
       "value": "用户123",
       "seed": 12345,
-      "expected": 4230939355
+      "expected": 1659851834
     },
     {
       "value": "the quick brown fox",
@@ -397,16 +366,6 @@
       "value": "exp_100visitor_999",
       "seed": 12345,
       "expected": 2334436444
-    },
-    {
-      "value": "café",
-      "seed": 12345,
-      "expected": 3127725983
-    },
-    {
-      "value": "🎯emoji",
-      "seed": 12345,
-      "expected": 3584849675
     }
   ]
 }

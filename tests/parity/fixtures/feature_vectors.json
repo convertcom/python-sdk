@@ -1,0 +1,251 @@
+{
+  "generated_from": {
+    "reference": "Convert JavaScript SDK (../javascript-sdk)",
+    "js_sdk_commit": "34f0a7a461722e628d28db88dc8098ed089efbfe",
+    "derivation": "Feature resolution via bucketing + fullStackFeature change casting",
+    "method": "machine-derived by running a dependency-free faithful Node port of the JS reference source (scripts/js_reference/emit_features.js); values are computed, never hand-authored",
+    "generator": "scripts/generate_parity_fixtures.py"
+  },
+  "vectors": [
+    {
+      "id": "enabled_with_cast_variables",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456"
+        },
+        "features": [
+          {
+            "id": "10024",
+            "key": "checkout-banner",
+            "variables": [
+              {
+                "key": "enabled",
+                "type": "boolean"
+              },
+              {
+                "key": "caption",
+                "type": "string"
+              },
+              {
+                "key": "max_items",
+                "type": "integer"
+              },
+              {
+                "key": "meta",
+                "type": "json"
+              }
+            ]
+          }
+        ],
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "banner-experiment",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "control",
+                "traffic_allocation": 100,
+                "changes": [
+                  {
+                    "id": "c1",
+                    "type": "fullStackFeature",
+                    "data": {
+                      "feature_id": "10024",
+                      "variables_data": {
+                        "enabled": "true",
+                        "caption": "Hello",
+                        "max_items": "7",
+                        "meta": "{\"a\":1}"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "feature_key": "checkout-banner",
+      "visitor_id": "visitor-feat-1",
+      "expected": {
+        "feature_key": "checkout-banner",
+        "feature_id": "10024",
+        "status": "enabled",
+        "variables": {
+          "enabled": true,
+          "caption": "Hello",
+          "max_items": 7,
+          "meta": {
+            "a": 1
+          }
+        },
+        "experience_key": "banner-experiment",
+        "variation_key": "control"
+      }
+    },
+    {
+      "id": "enabled_other_visitor",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456"
+        },
+        "features": [
+          {
+            "id": "10024",
+            "key": "checkout-banner",
+            "variables": [
+              {
+                "key": "enabled",
+                "type": "boolean"
+              },
+              {
+                "key": "caption",
+                "type": "string"
+              },
+              {
+                "key": "max_items",
+                "type": "integer"
+              },
+              {
+                "key": "meta",
+                "type": "json"
+              }
+            ]
+          }
+        ],
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "banner-experiment",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "control",
+                "traffic_allocation": 100,
+                "changes": [
+                  {
+                    "id": "c1",
+                    "type": "fullStackFeature",
+                    "data": {
+                      "feature_id": "10024",
+                      "variables_data": {
+                        "enabled": "true",
+                        "caption": "Hello",
+                        "max_items": "7",
+                        "meta": "{\"a\":1}"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "feature_key": "checkout-banner",
+      "visitor_id": "visitor-feat-2",
+      "expected": {
+        "feature_key": "checkout-banner",
+        "feature_id": "10024",
+        "status": "enabled",
+        "variables": {
+          "enabled": true,
+          "caption": "Hello",
+          "max_items": 7,
+          "meta": {
+            "a": 1
+          }
+        },
+        "experience_key": "banner-experiment",
+        "variation_key": "control"
+      }
+    },
+    {
+      "id": "undeclared_feature_miss",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456"
+        },
+        "features": [
+          {
+            "id": "10024",
+            "key": "checkout-banner",
+            "variables": [
+              {
+                "key": "enabled",
+                "type": "boolean"
+              },
+              {
+                "key": "caption",
+                "type": "string"
+              },
+              {
+                "key": "max_items",
+                "type": "integer"
+              },
+              {
+                "key": "meta",
+                "type": "json"
+              }
+            ]
+          }
+        ],
+        "experiences": [
+          {
+            "id": "e1",
+            "key": "banner-experiment",
+            "variations": [
+              {
+                "id": "v1",
+                "key": "control",
+                "traffic_allocation": 100,
+                "changes": [
+                  {
+                    "id": "c1",
+                    "type": "fullStackFeature",
+                    "data": {
+                      "feature_id": "10024",
+                      "variables_data": {
+                        "enabled": "true",
+                        "caption": "Hello",
+                        "max_items": "7",
+                        "meta": "{\"a\":1}"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "feature_key": "no-such-feature",
+      "visitor_id": "visitor-feat-1",
+      "expected": null
+    },
+    {
+      "id": "feature_without_experience_miss",
+      "config": {
+        "account_id": "100123",
+        "project": {
+          "id": "200456"
+        },
+        "features": [
+          {
+            "id": "10099",
+            "key": "orphan-feature",
+            "variables": []
+          }
+        ],
+        "experiences": []
+      },
+      "feature_key": "orphan-feature",
+      "visitor_id": "visitor-feat-1",
+      "expected": null
+    }
+  ]
+}

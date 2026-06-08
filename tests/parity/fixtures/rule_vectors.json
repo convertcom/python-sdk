@@ -1,0 +1,772 @@
+{
+  "generated_from": {
+    "reference": "Convert JavaScript SDK (../javascript-sdk)",
+    "js_sdk_commit": "34f0a7a461722e628d28db88dc8098ed089efbfe",
+    "derivation": "RuleManager.isRuleMatched + Comparisons (packages/rules, packages/utils)",
+    "method": "machine-derived by running a dependency-free faithful Node port of the JS reference source (scripts/js_reference/emit_rules.js); values are computed, never hand-authored",
+    "generator": "scripts/generate_parity_fixtures.py"
+  },
+  "vectors": [
+    {
+      "id": "equals_hit_ci",
+      "data": {
+        "country": "us"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "equals_miss",
+      "data": {
+        "country": "CA"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "equals_negated_hit",
+      "data": {
+        "country": "ca"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": true
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "equals_negated_miss",
+      "data": {
+        "country": "us"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": true
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "equalsNumber_alias",
+      "data": {
+        "age": "30"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equalsNumber",
+                      "negated": false
+                    },
+                    "key": "age",
+                    "value": "30"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "matches_alias",
+      "data": {
+        "plan": "PRO"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "matches",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": "pro"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "contains_hit",
+      "data": {
+        "url": "https://shop/CHECKOUT/cart"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "contains",
+                      "negated": false
+                    },
+                    "key": "url",
+                    "value": "checkout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "contains_miss",
+      "data": {
+        "url": "https://shop/home"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "contains",
+                      "negated": false
+                    },
+                    "key": "url",
+                    "value": "checkout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "contains_empty_needle",
+      "data": {
+        "url": "anything"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "contains",
+                      "negated": false
+                    },
+                    "key": "url",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "startsWith_hit",
+      "data": {
+        "path": "/Checkout/step1"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "startsWith",
+                      "negated": false
+                    },
+                    "key": "path",
+                    "value": "/checkout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "startsWith_miss",
+      "data": {
+        "path": "/home"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "startsWith",
+                      "negated": false
+                    },
+                    "key": "path",
+                    "value": "/checkout"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "endsWith_hit",
+      "data": {
+        "file": "REPORT.PDF"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "endsWith",
+                      "negated": false
+                    },
+                    "key": "file",
+                    "value": ".pdf"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "endsWith_miss",
+      "data": {
+        "file": "report.txt"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "endsWith",
+                      "negated": false
+                    },
+                    "key": "file",
+                    "value": ".pdf"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "less_numeric_hit",
+      "data": {
+        "age": "17"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "less",
+                      "negated": false
+                    },
+                    "key": "age",
+                    "value": "18"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "less_numeric_miss",
+      "data": {
+        "age": "21"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "less",
+                      "negated": false
+                    },
+                    "key": "age",
+                    "value": "18"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "lessEqual_boundary_hit",
+      "data": {
+        "age": "18"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "lessEqual",
+                      "negated": false
+                    },
+                    "key": "age",
+                    "value": "18"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "less_type_mismatch",
+      "data": {
+        "age": "young"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "less",
+                      "negated": false
+                    },
+                    "key": "age",
+                    "value": "18"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "exists_present",
+      "data": {
+        "plan": "pro"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "exists",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "exists_missing_key",
+      "data": {
+        "other": "x"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "exists",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "exists_empty_value",
+      "data": {
+        "plan": ""
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "exists",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "not_exists_missing_key",
+      "data": {
+        "other": "x"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "not_exists",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "not_exists_present",
+      "data": {
+        "plan": "pro"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "not_exists",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "doesNotExist_alias_missing",
+      "data": {
+        "other": "x"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "doesNotExist",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": ""
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "and_all_match",
+      "data": {
+        "country": "us",
+        "plan": "pro"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              },
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": "pro"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "and_one_miss",
+      "data": {
+        "country": "us",
+        "plan": "free"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              },
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "plan",
+                    "value": "pro"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    },
+    {
+      "id": "or_when_any_true",
+      "data": {
+        "tier": "gold"
+      },
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "tier",
+                    "value": "silver"
+                  },
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "tier",
+                    "value": "gold"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": true
+    },
+    {
+      "id": "empty_data_returns_false",
+      "data": {},
+      "rule": {
+        "OR": [
+          {
+            "AND": [
+              {
+                "OR_WHEN": [
+                  {
+                    "matching": {
+                      "match_type": "equals",
+                      "negated": false
+                    },
+                    "key": "country",
+                    "value": "US"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": false
+    }
+  ]
+}
