@@ -132,3 +132,14 @@ is isolated and logged so it cannot break delivery.
 - Logging seam: `SDKConfig.logger` (a stdlib `logging.Logger`) — no Protocol
 - Default adapters: `InMemoryDataStore`, the `httpx` transport, the in-process
   event bus
+
+## Future async / framework support
+
+These Protocol seams are the foundation for the **planned Phase 3** async surface
+and framework helpers. When async lands, each seam gains an *async sibling* (e.g.
+an `AsyncTransport` on `httpx.AsyncClient`, an `AsyncDataStore`) rather than being
+re-shaped — your existing sync adapters keep working unchanged. A
+forward-compatibility audit confirms no current module needs a rewrite to enable
+async. See the [roadmap](roadmap.md) and the
+[async & framework design intent](async.md) (none of it is implemented yet — it is
+gated on Phase 3 sign-off).

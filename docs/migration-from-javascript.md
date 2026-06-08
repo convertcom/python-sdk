@@ -126,9 +126,21 @@ The SDKs are kept in parity deliberately:
 So when you migrate, the *answers* (which variation, which variables, whether a
 conversion deduplicates) match the JS SDK — only the *spelling* is Pythonic.
 
+## Future async / framework support
+
+The JS SDK is async-by-nature; the Python SDK is **sync-first** today. A native
+async surface and framework-specific helpers (Django / FastAPI / Flask) are
+**planned for Phase 3** and not yet implemented — see the
+[roadmap](roadmap.md) and the [async & framework design intent](async.md). When
+that surface lands it preserves the same evaluation semantics and the **same
+Story 3.5 parity vectors** as the sync API, so a migration from the JS SDK lands
+on the same answers regardless of which surface you choose. Until then, async
+Python code can call the sync SDK from a coroutine via `asyncio.to_thread()`.
+
 ## Where to go next
 
 - [Initialization](initialization.md), [Evaluation](evaluation.md),
   [Tracking](tracking.md), [Queue control](queue-control.md)
 - [Extending](extending.md) — the Protocol seams in place of JS adapters
 - [Debugging](debugging.md) — the shared diagnostic reason codes
+- [Roadmap](roadmap.md) and [async & framework design intent](async.md) — what is coming next
