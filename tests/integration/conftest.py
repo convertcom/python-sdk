@@ -18,7 +18,7 @@ Frozen fixture names this harness exposes (qs-06 Code-Map / Tasks):
   tracking deliveries (returns 200; the route object records calls).
 * ``sdk_with_mock_transport`` — an initialized :class:`~convert_sdk.core.Core`
   wired to deliver through a RESPX-mocked HTTPS base URL.
-* ``in_memory_store`` — a fresh :class:`~convert_sdk.ports.storage.InMemoryDataStore`.
+* ``in_memory_store`` — a fresh :class:`~convert_sdk.adapters.storage.in_memory.InMemoryDataStore`.
 """
 
 from __future__ import annotations
@@ -31,10 +31,10 @@ import httpx
 import pytest
 import respx
 
+from convert_sdk import InMemoryDataStore
 from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.core import Core
-from convert_sdk.ports.storage import InMemoryDataStore
 
 _FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "config"
 

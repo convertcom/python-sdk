@@ -16,7 +16,7 @@ Parametrized over every row of the goal-deduplication truth table
 
 import pytest
 
-from convert_sdk.ports.storage import InMemoryDataStore
+from convert_sdk import InMemoryDataStore
 from convert_sdk.tracking.deduplication import (
     DedupDecision,
     evaluate_dedup,
@@ -32,6 +32,15 @@ def test_goal_marker_key_is_visitor_and_goal_scoped():
     k2 = goal_marker_key("v1", "g2")
     k3 = goal_marker_key("v2", "g1")
     assert k1 != k2 and k1 != k3 and k2 != k3
+
+
+def test_goal_marker_key_is_namespaced_and_collision_safe():
+    # F-050: collision-safe namespaced key f"dedup:{json.dumps([visitor, goal])}".
+    # A naive composite (f"{visitor}:{goal}") collides when values contain the
+    # separator; the JSON-list form does not.
+    assert goal_marker_key("v1", "g1").startswith("dedup:")
+    # ("a:b", "c") and ("a", "b:c") must produce DISTINCT keys.
+    assert goal_marker_key("a:b", "c") != goal_marker_key("a", "b:c")
 
 
 # --- truth table ----------------------------------------------------------

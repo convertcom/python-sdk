@@ -53,7 +53,10 @@ def test_sdk_config_rejects_non_positive_batch_size():
 
 
 def test_in_memory_store_set_get_roundtrip():
-    from convert_sdk.ports.storage import InMemoryDataStore
+    # Story 3.1: the concrete adapter moved to adapters/storage/in_memory.py (L3)
+    # and is re-exported from the package root; the L1 ports module exposes only
+    # the DataStore protocol now.
+    from convert_sdk import InMemoryDataStore
 
     store = InMemoryDataStore()
     store.set("k", "v")
@@ -61,14 +64,14 @@ def test_in_memory_store_set_get_roundtrip():
 
 
 def test_in_memory_store_get_missing_returns_none():
-    from convert_sdk.ports.storage import InMemoryDataStore
+    from convert_sdk import InMemoryDataStore
 
     store = InMemoryDataStore()
     assert store.get("missing") is None
 
 
 def test_in_memory_store_has_reflects_membership():
-    from convert_sdk.ports.storage import InMemoryDataStore
+    from convert_sdk import InMemoryDataStore
 
     store = InMemoryDataStore()
     assert store.has("k") is False
@@ -77,7 +80,7 @@ def test_in_memory_store_has_reflects_membership():
 
 
 def test_in_memory_store_satisfies_data_store_protocol():
-    from convert_sdk.ports.storage import DataStore, InMemoryDataStore
+    from convert_sdk import DataStore, InMemoryDataStore
 
     store = InMemoryDataStore()
     assert isinstance(store, DataStore)
@@ -90,11 +93,14 @@ def test_data_store_protocol_is_runtime_checkable():
         def get(self, key):  # pragma: no cover - shape only
             return None
 
-        def set(self, key, value):  # pragma: no cover - shape only
+        def set(self, key, value, ttl=None):  # pragma: no cover - shape only
             return None
 
         def has(self, key):  # pragma: no cover - shape only
             return False
+
+        def delete(self, key):  # pragma: no cover - shape only
+            return None
 
     assert isinstance(_Fake(), DataStore)
 
