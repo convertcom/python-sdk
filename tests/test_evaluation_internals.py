@@ -18,26 +18,28 @@ from convert_sdk.evaluation import bucketing, experiences, features, rules, segm
 
 
 # ---------------------------------------------------------------------------
-# bucketing._utf16_code_units — surrogate-pair (astral) handling
+# bucketing.murmurhash3_32 — UTF-8 byte-encoding coverage (BMP + astral chars)
 # ---------------------------------------------------------------------------
 
 
-def test_utf16_code_units_bmp_char_is_single_unit():
-    # A BMP character maps to one code unit equal to its code point.
-    assert bucketing._utf16_code_units("A") == [0x41]
+def test_murmurhash3_32_bmp_ascii_char():
+    # A single ASCII character encodes to 1 UTF-8 byte.
+    assert len("A".encode("utf-8")) == 1
+    assert bucketing.murmurhash3_32("A") == 1795346401
 
 
-def test_utf16_code_units_astral_char_splits_into_surrogate_pair():
-    # U+1F600 (😀) is outside the BMP and must split into a high/low surrogate
-    # pair to match JS charCodeAt semantics (covers the >0xFFFF branch).
-    units = bucketing._utf16_code_units("\U0001F600")
-    assert units == [0xD83D, 0xDE00]
-    assert all(0xD800 <= u <= 0xDFFF for u in units)
+def test_murmurhash3_32_astral_char_four_utf8_bytes():
+    # U+1F600 (😀) is outside the BMP and encodes to 4 UTF-8 bytes — NOT a
+    # surrogate pair. This covers the multi-byte / non-BMP branch of the UTF-8
+    # implementation, equivalent to what surrogate-pair tests covered before.
+    assert len("\U0001F600".encode("utf-8")) == 4
+    assert bucketing.murmurhash3_32("\U0001F600") == 689720682
 
 
-def test_utf16_code_units_mixed_string():
-    units = bucketing._utf16_code_units("a\U0001F600b")
-    assert units == [0x61, 0xD83D, 0xDE00, 0x62]
+def test_murmurhash3_32_mixed_ascii_and_astral():
+    # Mixed string: "a" (1 byte) + U+1F600 (4 bytes) + "b" (1 byte) = 6 bytes.
+    assert len("a\U0001F600b".encode("utf-8")) == 6
+    assert bucketing.murmurhash3_32("a\U0001F600b") == 2233175800
 
 
 # ---------------------------------------------------------------------------
