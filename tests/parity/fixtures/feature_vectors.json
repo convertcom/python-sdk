@@ -3,7 +3,7 @@
     "reference": "Convert JavaScript SDK (../javascript-sdk)",
     "js_sdk_commit": "34f0a7a461722e628d28db88dc8098ed089efbfe",
     "derivation": "Feature resolution via bucketing + fullStackFeature change casting",
-    "method": "machine-derived by running a dependency-free faithful Node port of the JS reference source (scripts/js_reference/emit_features.js); values are computed, never hand-authored",
+    "method": "machine-derived by running a Node oracle script (scripts/js_reference/emit_features.js) backed by the real npm murmurhash@^2.0.1 package (UTF-8 via TextEncoder, byte-length mix); values are computed, never hand-authored",
     "generator": "scripts/generate_parity_fixtures.py"
   },
   "vectors": [

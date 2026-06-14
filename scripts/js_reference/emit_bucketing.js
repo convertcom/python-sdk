@@ -9,6 +9,7 @@ const {murmurhash3_32} = require('./bucketing');
 
 const inputs = [
   '', 'a', 'ab', 'abc', 'abcd', 'test_visitor', '用户123',
+  'café', '🎯emoji',
   'the quick brown fox', '0', '12345',
   'e1visitor-1', 'e2visitor-1', '100456visitor_42',
   'visitor-aaaaaaaa', 'visitor-zzzzzzzz',

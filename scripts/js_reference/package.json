@@ -1,0 +1,8 @@
+{
+  "name": "convert-py-sdk-js-reference",
+  "private": true,
+  "description": "Regen-time Node oracle for Convert Python SDK parity fixtures. Run `npm install` before regenerating fixtures.",
+  "dependencies": {
+    "murmurhash": "^2.0.1"
+  }
+}

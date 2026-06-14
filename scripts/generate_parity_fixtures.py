@@ -9,15 +9,16 @@ remains the SDK's only runtime dep). It is needed ONLY at regeneration time —
 
 Drive strategy (qs-05 delegated the choice; resolved here)
 ----------------------------------------------------------
-The generator drives the sibling ``../javascript-sdk`` reference by spawning
-small, **dependency-free Node helper scripts** under ``scripts/js_reference/``.
-Each helper is a byte-faithful transcription of the corresponding JavaScript SDK
-source (bucketing hash, ``RuleManager`` + ``Comparisons``, ``DataManager`` entity
-lookup, ``SegmentsManager`` custom segments). They are faithful PORTS, so the
-golden values are COMPUTED by running the same algorithm the JS SDK runs — never
-hand-authored. A bare Node install suffices: the JS SDK's ``node_modules`` are
-NOT required (and are absent in this checkout), which is why a faithful port is
-used rather than importing the TypeScript packages directly.
+The generator drives Node oracle scripts under ``scripts/js_reference/``.
+The bucketing oracle (``emit_bucketing.js``) uses the **real** npm
+``murmurhash@^2.0.1`` package — the same package the JS SDK imports — so the
+golden hash values are byte-exact against the real JS reference rather than a
+hand port. That package encodes input strings as UTF-8 bytes via
+``new TextEncoder().encode(value)`` and mixes in the UTF-8 byte length.
+The other helpers (rules, features, state) are faithful ports of the JS SDK
+source (``RuleManager`` + ``Comparisons``, ``DataManager`` entity lookup,
+``SegmentsManager`` custom segments) and require no npm dependencies beyond
+``murmurhash``.
 
 Each emitted fixture file carries a top-level ``generated_from`` metadata block
 identifying the JS SDK commit/version the vectors were derived from, so any
@@ -30,8 +31,10 @@ Usage::
     python scripts/generate_parity_fixtures.py            # regenerate all four
     python scripts/generate_parity_fixtures.py --check     # fail if out of date
 
-Prerequisites: a Node runtime (any recent LTS) and the sibling ``../javascript-sdk``
-checkout present next to this repo. See ``tests/parity/README.md``.
+Prerequisites: a Node runtime (any recent LTS); run ``npm install`` inside
+``scripts/js_reference/`` to install ``murmurhash@^2.0.1`` before regenerating.
+The ``NODE_PATH`` environment variable can also point to a pre-installed location.
+See ``tests/parity/README.md``.
 """
 
 from __future__ import annotations
@@ -132,8 +135,9 @@ def _build_fixture(script_name: str, description: str, js_rev: str) -> Dict[str,
             "js_sdk_commit": js_rev,
             "derivation": description,
             "method": (
-                "machine-derived by running a dependency-free faithful Node port "
-                f"of the JS reference source (scripts/js_reference/{script_name}); "
+                "machine-derived by running a Node oracle script "
+                f"(scripts/js_reference/{script_name}) backed by the real npm "
+                "murmurhash@^2.0.1 package (UTF-8 via TextEncoder, byte-length mix); "
                 "values are computed, never hand-authored"
             ),
             "generator": "scripts/generate_parity_fixtures.py",
