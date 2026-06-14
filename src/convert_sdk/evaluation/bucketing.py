@@ -11,11 +11,12 @@ Parity contract
 ---------------
 The JS SDK imports the npm ``murmurhash`` package and calls ``Murmurhash.v3``
 (``../javascript-sdk/packages/utils/src/string-utils.ts`` ``generateHash``,
-default seed ``9999``). That implementation processes the input via
-``charCodeAt(i) & 0xff`` over **UTF-16 code units** (not UTF-8 bytes) and mixes
-in ``key.length`` measured in code units. :func:`murmurhash3_32` replicates this
-exactly so the output is byte-exact against the JS reference across the full
-golden-vector suite in ``tests/parity/fixtures/bucketing_vectors.json``.
+default seed ``9999``). That implementation converts the input string to **UTF-8
+bytes** via ``new TextEncoder().encode(value)`` and mixes in the UTF-8 **byte
+length**. The PHP SDK also uses UTF-8 (``unpack('C*')``) for the same reason.
+:func:`murmurhash3_32` replicates this exactly so the output is byte-exact
+against the JS and PHP references across the full golden-vector suite in
+``tests/parity/fixtures/bucketing_vectors.json``.
 
 Output is an **unsigned** 32-bit integer in ``[0, 2**32)`` — matching the npm
 ``v3`` output the JS bucketing manager divides by ``DEFAULT_MAX_HASH``
@@ -37,27 +38,6 @@ _C1 = 0xCC9E2D51
 _C2 = 0x1B873593
 
 
-def _utf16_code_units(value: str) -> list:
-    """Return the UTF-16 code units of ``value`` as a list of ints.
-
-    JavaScript strings are sequences of UTF-16 code units, and the npm
-    ``murmurhash`` ``v3`` implementation reads them via ``charCodeAt``. Python
-    ``str`` indexing yields Unicode code points, so characters outside the BMP
-    must be split into surrogate pairs to match JS ``charCodeAt`` semantics.
-    """
-    units: list = []
-    for char in value:
-        code_point = ord(char)
-        if code_point > 0xFFFF:
-            # Encode as a UTF-16 surrogate pair (matches JS string storage).
-            code_point -= 0x10000
-            units.append(0xD800 + (code_point >> 10))
-            units.append(0xDC00 + (code_point & 0x3FF))
-        else:
-            units.append(code_point)
-    return units
-
-
 def _rotl32(value: int, shift: int) -> int:
     """Rotate a 32-bit unsigned integer left by ``shift`` bits."""
     value &= _UINT32_MASK
@@ -68,8 +48,11 @@ def murmurhash3_32(value: str, seed: int = DEFAULT_HASH_SEED) -> int:
     """Compute the MurmurHash3-32 of ``value`` as an unsigned 32-bit integer.
 
     Byte-exact with the JavaScript SDK's ``Murmurhash.v3`` (npm ``murmurhash``)
-    for the same inputs. The default ``seed`` is ``9999`` — the frozen Convert
-    bucketing seed shared across the JS, PHP, and Python SDKs.
+    and the PHP SDK for the same inputs. The input string is encoded to **UTF-8
+    bytes** (matching the npm package's ``new TextEncoder().encode(value)``), and
+    the UTF-8 byte length is mixed into the finalizer. The default ``seed`` is
+    ``9999`` — the frozen Convert bucketing seed shared across the JS, PHP, and
+    Python SDKs.
 
     Args:
         value: The string to hash. Non-``str`` callers must coerce first.
@@ -78,8 +61,8 @@ def murmurhash3_32(value: str, seed: int = DEFAULT_HASH_SEED) -> int:
     Returns:
         An unsigned 32-bit integer in ``[0, 2**32)``.
     """
-    units = _utf16_code_units(value)
-    length = len(units)
+    data = value.encode("utf-8")
+    length = len(data)
     remainder = length & 3
     bytes_count = length - remainder
 
@@ -88,10 +71,10 @@ def murmurhash3_32(value: str, seed: int = DEFAULT_HASH_SEED) -> int:
 
     while i < bytes_count:
         k1 = (
-            (units[i] & 0xFF)
-            | ((units[i + 1] & 0xFF) << 8)
-            | ((units[i + 2] & 0xFF) << 16)
-            | ((units[i + 3] & 0xFF) << 24)
+            (data[i] & 0xFF)
+            | ((data[i + 1] & 0xFF) << 8)
+            | ((data[i + 2] & 0xFF) << 16)
+            | ((data[i + 3] & 0xFF) << 24)
         ) & _UINT32_MASK
         i += 4
 
@@ -105,17 +88,17 @@ def murmurhash3_32(value: str, seed: int = DEFAULT_HASH_SEED) -> int:
 
     k1 = 0
     if remainder == 3:
-        k1 ^= (units[i + 2] & 0xFF) << 16
+        k1 ^= (data[i + 2] & 0xFF) << 16
     if remainder >= 2:
-        k1 ^= (units[i + 1] & 0xFF) << 8
+        k1 ^= (data[i + 1] & 0xFF) << 8
     if remainder >= 1:
-        k1 ^= units[i] & 0xFF
+        k1 ^= data[i] & 0xFF
         k1 = (k1 * _C1) & _UINT32_MASK
         k1 = _rotl32(k1, 15)
         k1 = (k1 * _C2) & _UINT32_MASK
         h1 ^= k1
 
-    # Finalization — mix in the code-unit length, then the avalanche.
+    # Finalization — mix in the UTF-8 byte length, then the avalanche.
     h1 ^= length
     h1 &= _UINT32_MASK
     h1 ^= h1 >> 16

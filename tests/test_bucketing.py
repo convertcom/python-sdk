@@ -20,8 +20,9 @@ def test_empty_string_hash_is_seed_dependent():
 
 
 def test_unicode_string_hashes_without_error():
-    # 用户123 — multi-byte unicode handled via the JS charCodeAt&0xff semantics.
-    assert murmurhash3_32("用户123") == 531569922
+    # 用户123 — multi-byte unicode handled via UTF-8 byte encoding (matching npm
+    # murmurhash TextEncoder and PHP SDK unpack('C*')).
+    assert murmurhash3_32("用户123") == 3859151469
 
 
 def test_large_seed_is_supported():
