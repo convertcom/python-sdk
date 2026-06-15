@@ -43,7 +43,7 @@ jobs:
       - name: Sync dev environment
         run: uv sync --group dev
       - name: Ruff lint
-        run: uv run ruff check src tests scripts
+        run: uv run ruff check src tests scripts demo
 
   type-check:
     name: mypy --strict

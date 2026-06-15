@@ -1,0 +1,144 @@
+{
+  "_comment": "OFFLINE demo fixture using the real staging entity keys (F-066). Entity keys match ../javascript-sdk/demo/nodejs/routes/events.js and ../php-sdk/demo/laravel/config/convert.php. Account/project IDs are the shared public staging project (10035569/10034190). Experience, feature, segment, and goal IDs below are placeholder values used ONLY for deterministic offline evaluation — the LIVE run fetches the real IDs from the staging config endpoint. TOPOLOGY: test-experience-ab-fullstack-4 is modelled as an EXPERIENCE (a feature-rollout type), matching the live staging topology where the PHP demo calls runExperience('test-experience-ab-fullstack-4') and the JS demo also uses runExperience (not runFeature). Source: ../php-sdk/demo/laravel/config/convert.php:7 (feature_rollout_key). NOTE: the JS demo's 'test-feature-rollout-1' key is STALE — absent from ../javascript-sdk/packages/js-sdk/tests/integration/static-config.json. Both experiences and all features are UNGATED (no audience/location rules) so OFFLINE buckets deterministically regardless of the attributes/location passed by the demo.",
+  "account_id": "10035569",
+  "project": {
+    "id": "10034190",
+    "key": "test-experience-ab-fullstack-1"
+  },
+  "features": [
+    {
+      "id": "feature-rollout-4",
+      "key": "test-experience-ab-fullstack-4",
+      "name": "Test Experience AB FullStack 4 (Feature Rollout)",
+      "variables": [
+        {"key": "enabled", "type": "boolean"},
+        {"key": "headline", "type": "string"},
+        {"key": "button_color", "type": "string"},
+        {"key": "max_items", "type": "integer"},
+        {"key": "caption", "type": "string"}
+      ]
+    }
+  ],
+  "experiences": [
+    {
+      "id": "demo-exp-1",
+      "key": "test-experience-ab-fullstack-1",
+      "name": "Test Experience AB FullStack 1",
+      "variations": [
+        {
+          "id": "demo-var-control",
+          "key": "variation-control",
+          "traffic_allocation": 50.0,
+          "changes": [
+            {
+              "id": "demo-change-control",
+              "type": "fullStackFeature",
+              "data": {
+                "feature_id": "feature-rollout-4",
+                "variables_data": {
+                  "enabled": "false",
+                  "headline": "Welcome to our site",
+                  "button_color": "blue",
+                  "max_items": "5",
+                  "caption": "Click this"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "demo-var-treatment",
+          "key": "variation-treatment",
+          "traffic_allocation": 50.0,
+          "changes": [
+            {
+              "id": "demo-change-treatment",
+              "type": "fullStackFeature",
+              "data": {
+                "feature_id": "feature-rollout-4",
+                "variables_data": {
+                  "enabled": "true",
+                  "headline": "Exclusive offer just for you!",
+                  "button_color": "green",
+                  "max_items": "10",
+                  "caption": "Click that"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo-rollout-exp-4",
+      "key": "test-experience-ab-fullstack-4",
+      "name": "Test Experience AB FullStack 4 (Rollout Experience)",
+      "variations": [
+        {
+          "id": "demo-rollout-var-original",
+          "key": "rollout-original",
+          "traffic_allocation": 50.0,
+          "changes": [
+            {
+              "id": "demo-rollout-change-original",
+              "type": "fullStackFeature",
+              "data": {
+                "feature_id": "feature-rollout-4",
+                "variables_data": {
+                  "enabled": "false",
+                  "headline": "Welcome to our site",
+                  "button_color": "blue",
+                  "max_items": "5",
+                  "caption": "Click this"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "demo-rollout-var-treatment",
+          "key": "rollout-treatment",
+          "traffic_allocation": 50.0,
+          "changes": [
+            {
+              "id": "demo-rollout-change-treatment",
+              "type": "fullStackFeature",
+              "data": {
+                "feature_id": "feature-rollout-4",
+                "variables_data": {
+                  "enabled": "true",
+                  "headline": "Exclusive offer just for you!",
+                  "button_color": "green",
+                  "max_items": "10",
+                  "caption": "Click that"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "goals": [
+    {
+      "id": "goal-primary-click",
+      "key": "button-primary-click",
+      "name": "Button Primary Click"
+    }
+  ],
+  "audiences": [],
+  "segments": [
+    {
+      "id": "seg-1",
+      "key": "test-segment-1",
+      "name": "Test Segment 1",
+      "rules": [
+        {
+          "match_type": "equals",
+          "attribute": "customer_type",
+          "value": "premium"
+        }
+      ]
+    }
+  ]
+}

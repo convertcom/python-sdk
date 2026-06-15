@@ -29,3 +29,9 @@ htmlcov/
 
 # OS / editor cruft
 .DS_Store
+
+# Local staging verification script (network-hitting, not committed)
+scripts/verify_staging_transaction.py
+
+# Demo harness local credentials (never committed)
+demo/.env
