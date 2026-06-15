@@ -46,6 +46,21 @@ include = [
     # Ship the runnable quickstart examples in the source distribution so the
     # onboarding path travels with the package (Story 1.6).
     "examples",
+    # demo/ is intentionally excluded from the sdist (and from the wheel via the
+    # packages = ["src/convert_sdk"] wheel target above): it is a manual
+    # verification harness, not part of the published SDK surface (F-066).
+]
+exclude = [
+    # Hatchling's sdist builder auto-includes README-style files found via VCS
+    # traversal even when an explicit `include` list is set. Exclude demo/ and
+    # other non-shipping directories explicitly so the produced sdist is clean.
+    "demo",
+    "scripts",
+    "tests",
+    "changes",
+    "docs",
+    "ci",
+    ".github",
 ]
 
 [tool.pytest.ini_options]
