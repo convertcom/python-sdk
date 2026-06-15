@@ -57,8 +57,8 @@ class _FakeTransport:
             raise item
         return item
 
-    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:  # pragma: no cover
-        pass
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> int:  # pragma: no cover
+        return 200
 
     def close(self) -> None:
         self.closed = True

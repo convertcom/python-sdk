@@ -64,14 +64,18 @@ def test_batch_size_release_delivers_without_explicit_flush(
     from convert_sdk.config import SDKConfig, TransportConfig
     from convert_sdk.core import Core
 
-    from .conftest import MOCK_BASE_URL
+    from .conftest import MOCK_BASE_URL, MOCK_TRACK_BASE_URL
 
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
     core = Core(
         SDKConfig(
             sdk_key=SDK_KEY,
             batch_size=2,
-            transport=TransportConfig(base_url=MOCK_BASE_URL),
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
         ),
         transport=transport,
     ).initialize()
@@ -117,16 +121,23 @@ def test_failed_delivery_surfaces_via_event_drops_events_and_does_not_raise(
     from convert_sdk.core import Core
     from convert_sdk.events import LifecycleEvent, QueueReleasedPayload
 
-    from .conftest import MOCK_BASE_URL
+    from .conftest import MOCK_BASE_URL, MOCK_TRACK_BASE_URL
 
     # Both POSTs fail (503) — there is no tracking-layer retry; the transport
     # adapter raises TrackingDeliveryError and the release path drops the events.
     route = respx_mock.post(f"/track/{SDK_KEY}").mock(
         return_value=httpx.Response(503, text="unavailable")
     )
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
     core = Core(
-        SDKConfig(sdk_key=SDK_KEY, transport=TransportConfig(base_url=MOCK_BASE_URL)),
+        SDKConfig(
+            sdk_key=SDK_KEY,
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
+        ),
         transport=transport,
     ).initialize()
     released = []
@@ -189,8 +200,9 @@ def test_successful_flush_emits_queue_released_with_reason_and_counts(
     assert payload.batch_size == 2
     assert payload.event_count == 2
     assert payload.visitor_count == 2
-    # Success payload carries no failure diagnostic context.
-    assert payload.status_code is None
+    # Success payload carries the real 2xx from the metrics endpoint (not None).
+    assert isinstance(payload.status_code, int)
+    assert 200 <= payload.status_code < 300
 
 
 def test_empty_flush_emits_no_queue_released(
@@ -222,12 +234,19 @@ def test_failure_event_and_log_contain_no_secrets_or_pii(
     from convert_sdk.core import Core
     from convert_sdk.events import LifecycleEvent
 
-    from .conftest import MOCK_BASE_URL
+    from .conftest import MOCK_BASE_URL, MOCK_TRACK_BASE_URL
 
     respx_mock.post(f"/track/{SDK_KEY}").mock(return_value=httpx.Response(500))
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
     core = Core(
-        SDKConfig(sdk_key=SDK_KEY, transport=TransportConfig(base_url=MOCK_BASE_URL)),
+        SDKConfig(
+            sdk_key=SDK_KEY,
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
+        ),
         transport=transport,
     ).initialize()
     captured = []

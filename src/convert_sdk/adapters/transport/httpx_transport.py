@@ -28,6 +28,23 @@ can never reach this adapter. Optional bearer auth is injected as an
 ``Authorization`` header. All HTTP/transport/decode failures surface as a typed
 :class:`~convert_sdk.errors.ConfigLoadError` with a redacted endpoint and status
 code (NFR23 / qs-08 shim).
+
+Tracking events are delivered to a SEPARATE metrics endpoint, NOT the config CDN:
+
+    ``POST {track_base}/track/{sdkKey}``
+
+where ``track_base`` is ``TransportConfig.track_base_url`` with the
+``[project_id]`` placeholder substituted with the real project id read from the
+payload's ``projectId`` field (JS parity: api-manager.ts line 224-228; PHP
+parity: ApiManager.php line 322). Every tracking POST also sets the header::
+
+    ``User-Agent: ConvertAgent/1.0``
+
+so the metrics endpoint's bot filter (``isConvertAgentUA`` bypass) recognises
+Convert SDK traffic and does NOT silently drop events. Both JS
+(http-client.ts:16 ``CONVERT_AGENT_USER_AGENT = 'ConvertAgent/1.0'``) and PHP
+(ApiManager.php:64 ``private const CONVERT_AGENT_USER_AGENT = 'ConvertAgent/1.0'``)
+set this header on every tracking request.
 """
 
 from __future__ import annotations
@@ -37,6 +54,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from convert_sdk._internal.redaction import redact_url
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.errors import ConfigLoadError, TrackingDeliveryError
 
@@ -122,33 +140,79 @@ class HttpxTransport:
             )
         return body
 
-    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:
-        """POST a serialized tracking-events batch to ``/track/{sdkKey}`` (Story 2.3).
+    # --- tracking delivery (metrics host) ------------------------------------
 
-        Delivers over the long-lived HTTPS client (TLS-only is enforced upstream
-        at :class:`~convert_sdk.config.TransportConfig` construction). Performs
-        NO retry/backoff — the tracking layer calls this exactly once per queue
-        release. Any transport/HTTP failure (connection error or non-2xx status)
-        raises a typed :class:`~convert_sdk.errors.TrackingDeliveryError` with a
-        redacted endpoint so the caller can leave the queue intact for a later
-        flush, without leaking the SDK key or query string (NFR23).
+    #: User-Agent required by the metrics-endpoint bot filter to recognise
+    #: Convert SDK traffic via its ``isConvertAgentUA`` bypass. Must start with
+    #: ``ConvertAgent/``. JS parity: http-client.ts:16; PHP parity:
+    #: ApiManager.php:64.
+    _CONVERT_AGENT_USER_AGENT = "ConvertAgent/1.0"
+
+    @staticmethod
+    def _build_track_url(track_base_url: str, project_id: str, sdk_key: str) -> str:
+        """Resolve the absolute tracking URL for this request.
+
+        Substitutes ``[project_id]`` with the real project id in the
+        ``track_base_url`` template (JS parity: api-manager.ts line 224-228;
+        PHP parity: ApiManager.php line 322), then appends the
+        ``/track/{sdkKey}`` route segment.
         """
-        route = f"/track/{sdk_key}"
-        endpoint = f"{self._config.base_url}{route}"
+        resolved_base = track_base_url.replace("[project_id]", project_id)
+        return f"{resolved_base}/track/{sdk_key}"
+
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> int:
+        """POST a serialized tracking-events batch to the metrics endpoint.
+
+        Tracking events are delivered to a SEPARATE metrics endpoint:
+
+            ``POST {track_base}/track/{sdkKey}``
+
+        where ``track_base`` is ``TransportConfig.track_base_url`` with the
+        ``[project_id]`` placeholder substituted from ``payload["projectId"]``.
+        This is the JS/PHP SDK behavior — tracking MUST NOT go to the config
+        CDN host (the CDN returns 403 for tracking POSTs).
+
+        Also sets ``User-Agent: ConvertAgent/1.0`` so the metrics endpoint's bot
+        filter recognises Convert SDK traffic and does NOT silently drop events
+        (the bot filter returns 200 OK but discards events lacking this UA).
+
+        Returns the HTTP status code (int, e.g. 200) on a successful delivery
+        so the caller can populate ``QueueReleasedPayload.status_code`` on the
+        success path.
+
+        Performs NO retry/backoff — the tracking layer calls this exactly once
+        per queue release. Any transport/HTTP failure raises a typed
+        :class:`~convert_sdk.errors.TrackingDeliveryError` with a redacted
+        endpoint (NFR23).
+        """
+        project_id = str(payload.get("projectId", ""))
+        track_url = self._build_track_url(
+            self._config.track_base_url, project_id, sdk_key
+        )
+        # Redacted endpoint for error messages — query-string-free host+path
+        # with SDK key masked (NFR23 / qs-08).
+        redacted_endpoint = redact_url(track_url) or track_url
+        tracking_headers = {
+            "User-Agent": self._CONVERT_AGENT_USER_AGENT,
+        }
         try:
-            response = self._client.post(route, json=payload)
+            response = self._client.post(
+                track_url, json=payload, headers=tracking_headers
+            )
         except httpx.HTTPError as exc:  # connection/timeout/etc.
             raise TrackingDeliveryError(
                 f"tracking delivery failed: {type(exc).__name__}",
-                endpoint=endpoint,
+                endpoint=redacted_endpoint,
             ) from exc
 
         if response.status_code >= 400:
             raise TrackingDeliveryError(
                 "tracking delivery returned an error status",
-                endpoint=endpoint,
+                endpoint=redacted_endpoint,
                 status_code=response.status_code,
             )
+
+        return response.status_code
 
     def close(self) -> None:
         self._client.close()

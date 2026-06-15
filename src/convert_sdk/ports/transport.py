@@ -37,13 +37,16 @@ class Transport(Protocol):
         """
         ...
 
-    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> int:
         """Deliver a serialized tracking-events batch over HTTPS (Story 2.3).
 
         POSTs ``payload`` (the verbose JS-SDK batch envelope produced by
         ``tracking/payloads.py``) to the JS-parity route ``/track/{sdkKey}``.
         Performs no retry/backoff — transport-level retries (if any) live in the
         adapter, and the tracking layer calls this exactly once per release.
+        Returns the HTTP status code (int, e.g. 200) on a successful delivery
+        so the caller can populate ``QueueReleasedPayload.status_code`` on the
+        success path.
         Raises a typed :class:`~convert_sdk.errors.ConvertSDKError` (subclass) on
         any transport/HTTP failure so the caller can leave the queue intact.
         """
