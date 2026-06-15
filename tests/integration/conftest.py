@@ -19,6 +19,14 @@ Frozen fixture names this harness exposes (qs-06 Code-Map / Tasks):
 * ``sdk_with_mock_transport`` — an initialized :class:`~convert_sdk.core.Core`
   wired to deliver through a RESPX-mocked HTTPS base URL.
 * ``in_memory_store`` — a fresh :class:`~convert_sdk.adapters.storage.in_memory.InMemoryDataStore`.
+
+Tracking endpoint note: in production, tracking posts to a SEPARATE metrics host
+(``TransportConfig.track_base_url``; default ``https://[project_id].metrics.…``).
+In integration tests we point ``track_base_url`` at ``MOCK_BASE_URL`` (the same
+RESPX-intercepted host as config) so all test-mode traffic stays on one fake host.
+The project-id ``[project_id]`` placeholder in the template is NOT used here
+because ``MOCK_BASE_URL`` has no placeholder; the route simply becomes
+``{MOCK_BASE_URL}/track/{sdkKey}``, which RESPX intercepts as expected.
 """
 
 from __future__ import annotations
@@ -43,6 +51,14 @@ _FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "config"
 # https).
 MOCK_BASE_URL = "https://mock-cdn.convertexperiments.test"
 SDK_KEY = "test-sdk-key-1234"
+
+# In integration tests, tracking is sent to MOCK_BASE_URL (not the real metrics
+# host) so all HTTP stays within the RESPX mock boundary. Tests that construct
+# their own TransportConfig MUST pass track_base_url=MOCK_TRACK_BASE_URL so the
+# tracking route resolves to MOCK_BASE_URL/track/{sdkKey} where RESPX intercepts
+# it. Without this, send_tracking() would POST to the production metrics host
+# template, which RESPX does not intercept.
+MOCK_TRACK_BASE_URL = MOCK_BASE_URL
 
 
 def load_config_fixture(name: str) -> Dict[str, Any]:
@@ -107,9 +123,20 @@ def sdk_with_mock_transport(respx_mock, mock_config_endpoint, mock_tracking_endp
     ``mock_config_endpoint``) and delivers tracking (via
     ``mock_tracking_endpoint``) over the mocked transport. A small ``batch_size``
     is NOT forced here — tests that want batch-size release set it explicitly.
+
+    ``track_base_url`` is set to ``MOCK_TRACK_BASE_URL`` (= ``MOCK_BASE_URL``) so
+    tracking POSTs are intercepted by RESPX at the same mock host as config
+    fetches, rather than going to the real production metrics host.
     """
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
-    config = SDKConfig(sdk_key=SDK_KEY, transport=TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
+    config = SDKConfig(
+        sdk_key=SDK_KEY,
+        transport=TransportConfig(
+            base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+        ),
+    )
     core = Core(config, transport=transport).initialize()
     try:
         yield core

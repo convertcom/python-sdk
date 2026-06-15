@@ -4,17 +4,18 @@ Two small, dependency-free config types describe how the SDK is initialized:
 
 * :class:`SDKConfig` — *what* to load: either a remote ``sdk_key`` (config is
   fetched over HTTPS) or direct ``data`` (a preloaded config dict, no network).
-* :class:`TransportConfig` — *how* to reach the config endpoint: base URL,
-  timeout, optional auth secret, and extra headers.
+* :class:`TransportConfig` — *how* to reach the config endpoint and the
+  separate metrics tracking endpoint: base URL (config CDN), track_base_url
+  (metrics host template), timeout, optional auth secret, and extra headers.
 
 Boundary validation is intentionally lightweight and ``pydantic``-free so the
 core package stays dependency-minimal and Python 3.9+ compatible (per the
 story's Technical Specifics). The only runtime dependency the SDK declares is
 ``httpx`` (see ``pyproject.toml``; bound ``>=0.28,<1.0`` per qs-09 F-060).
 
-NFR8 (TLS-only transport) is enforced here: a non-HTTPS ``base_url`` raises
-:class:`~convert_sdk.errors.TransportError` at construction time, before any
-network I/O is possible (AC #4).
+NFR8 (TLS-only transport) is enforced here: a non-HTTPS ``base_url`` or
+``track_base_url`` raises :class:`~convert_sdk.errors.TransportError` at
+construction time, before any network I/O is possible (AC #4).
 """
 
 from __future__ import annotations
@@ -32,6 +33,20 @@ from convert_sdk.errors import InvalidConfigError, TransportError
 # ``https://cdn-4-staging.convertexperiments.com`` (same path convention).
 DEFAULT_CONFIG_BASE_URL = "https://cdn-4.convertexperiments.com"
 
+# The production Convert metrics host template for tracking delivery.
+# The literal ``[project_id]`` placeholder is substituted with the real project
+# id AT REQUEST TIME (JS parity: api-manager.ts line 224-228 uses
+# ``this._trackEndpoint.replace('[project_id]', this._projectId.toString())``;
+# PHP parity: ApiManager.php line 322 uses ``str_replace``).
+# The transport adapter appends the route ``/track/{sdkKey}`` to the resolved
+# host. Both JS (.env.example line 13) and PHP (DefaultConfig.php line 22) use
+# this same default template string.
+#
+# There is NO staging-specific metrics host — the serving spec lists only the
+# live host (metrics.convertexperiments.com) and a dev host. Staging tracking
+# uses the same prod metrics host with the project id substituted.
+DEFAULT_TRACK_BASE_URL = "https://[project_id].metrics.convertexperiments.com/v1"
+
 #: Cache levels mirrored from the JS SDK. ``"low"`` appends ``_conv_low_cache=1``
 #: to the config route (JS parity: api-manager.ts getConfig()).
 _VALID_CACHE_LEVELS = (None, "low")
@@ -39,20 +54,29 @@ _VALID_CACHE_LEVELS = (None, "low")
 
 @dataclass(frozen=True)
 class TransportConfig:
-    """Transport settings for fetching config over HTTPS.
+    """Transport settings for fetching config and delivering tracking events.
 
     Args:
-        base_url: HTTPS base URL of the config-serving endpoint. Must use the
-            ``https`` scheme — a non-HTTPS URL raises :class:`TransportError`
-            (NFR8 / AC #4).
-        timeout: Request timeout in seconds.
+        base_url: HTTPS base URL of the config-serving CDN endpoint (pure host,
+            no path). Must use the ``https`` scheme — a non-HTTPS URL raises
+            :class:`TransportError` (NFR8 / AC #4).
+        track_base_url: HTTPS base URL template for the metrics tracking
+            endpoint. The literal ``[project_id]`` placeholder is substituted
+            with the real project id at request time (JS/PHP parity). Defaults
+            to ``DEFAULT_TRACK_BASE_URL``. Must use the ``https`` scheme after
+            the placeholder is considered a non-scheme segment, so the raw
+            template string is checked for an ``https`` scheme here and the
+            substitution never changes the scheme.
+        timeout: Request timeout in seconds (applied to both config and tracking
+            requests).
         auth_secret: Optional bearer secret injected as an ``Authorization``
-            header for authenticated keys.
+            header for config fetch requests.
         headers: Optional extra headers to send with the config request.
         verify_tls: Whether to verify TLS certificates. Defaults to ``True``.
     """
 
     base_url: str = DEFAULT_CONFIG_BASE_URL
+    track_base_url: str = DEFAULT_TRACK_BASE_URL
     timeout: float = 10.0
     auth_secret: Optional[str] = None
     headers: Mapping[str, str] = field(default_factory=dict)
@@ -65,6 +89,19 @@ class TransportConfig:
             raise TransportError(
                 "transport base_url must use HTTPS (TLS-only transport, NFR8); "
                 f"got scheme={scheme!r}"
+            )
+        # The track_base_url may contain the ``[project_id]`` placeholder
+        # template, which is not a valid URI component and causes Python 3.13+'s
+        # stricter urlsplit to raise ValueError ("Invalid IPv6 URL") when it
+        # misparses the brackets. We extract the scheme by splitting on "://"
+        # directly rather than calling urlsplit, which is safe because we only
+        # need to verify the scheme prefix (not parse the full URL).
+        raw_track = self.track_base_url
+        track_scheme = raw_track.split("://", 1)[0].lower() if "://" in raw_track else ""
+        if track_scheme != "https":
+            raise TransportError(
+                "transport track_base_url must use HTTPS (TLS-only transport, "
+                f"NFR8); got scheme={track_scheme!r}"
             )
 
 

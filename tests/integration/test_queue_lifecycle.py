@@ -56,14 +56,18 @@ def test_timer_based_flush_delivers_without_explicit_call(
     from convert_sdk.config import SDKConfig, TransportConfig
     from convert_sdk.core import Core
 
-    from .conftest import MOCK_BASE_URL
+    from .conftest import MOCK_BASE_URL, MOCK_TRACK_BASE_URL
 
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
     core = Core(
         SDKConfig(
             sdk_key=SDK_KEY,
             auto_flush_interval_ms=50,
-            transport=TransportConfig(base_url=MOCK_BASE_URL),
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
         ),
         transport=transport,
     ).initialize()
@@ -104,6 +108,7 @@ _SCRIPT = textwrap.dedent(
         def send_tracking(self, payload, *, sdk_key):
             with open(OUTFILE, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(payload) + "\\n")
+            return 200
         def close(self):
             pass
 
@@ -237,14 +242,18 @@ def test_batch_size_release_emits_queue_released_reason_size(
     from convert_sdk.core import Core
     from convert_sdk.events import LifecycleEvent
 
-    from .conftest import MOCK_BASE_URL
+    from .conftest import MOCK_BASE_URL, MOCK_TRACK_BASE_URL
 
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
     core = Core(
         SDKConfig(
             sdk_key=SDK_KEY,
             batch_size=2,
-            transport=TransportConfig(base_url=MOCK_BASE_URL),
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
         ),
         transport=transport,
     ).initialize()
@@ -268,14 +277,18 @@ def test_timer_release_emits_queue_released_reason_timeout(
     from convert_sdk.core import Core
     from convert_sdk.events import LifecycleEvent
 
-    from .conftest import MOCK_BASE_URL
+    from .conftest import MOCK_BASE_URL, MOCK_TRACK_BASE_URL
 
-    transport = HttpxTransport(TransportConfig(base_url=MOCK_BASE_URL))
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
     core = Core(
         SDKConfig(
             sdk_key=SDK_KEY,
             auto_flush_interval_ms=50,
-            transport=TransportConfig(base_url=MOCK_BASE_URL),
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
         ),
         transport=transport,
     ).initialize()

@@ -101,8 +101,9 @@ class RecordingTransport:
         self.fetch_calls += 1
         return self._config
 
-    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> int:
         self.deliveries.append((payload, sdk_key))
+        return 200
 
     def close(self) -> None:
         self.closed = True

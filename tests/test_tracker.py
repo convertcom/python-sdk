@@ -15,9 +15,11 @@ coverage lives in ``tests/integration/`` per qs-06).
 from typing import Any, Dict, List
 
 from convert_sdk import InMemoryDataStore
+from convert_sdk.adapters.events.in_process import InProcessEventBus
 from convert_sdk.config import SDKConfig
 from convert_sdk.config_loader import load_snapshot
 from convert_sdk.domain.results import ConversionStatus
+from convert_sdk.events import LifecycleEvent, QueueReleasedPayload
 from convert_sdk.tracking.tracker import Tracker
 
 
@@ -45,12 +47,13 @@ class FakeTransport:
     def fetch_config(self, config):  # pragma: no cover - unused here
         return {}
 
-    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> None:
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> int:
         if self.fail:
             from convert_sdk.errors import TrackingDeliveryError
 
             raise TrackingDeliveryError("boom")
         self.calls.append({"payload": payload, "sdk_key": sdk_key})
+        return 200
 
     def close(self) -> None:  # pragma: no cover - unused here
         pass
@@ -155,3 +158,39 @@ def test_track_returns_dedup_outcome():
     assert first.status is ConversionStatus.QUEUED
     second = tracker.track(visitor_id="v1", goal_key="purchase_completed")
     assert second.status is ConversionStatus.DEDUPLICATED
+
+
+def test_successful_flush_emits_queue_released_with_numeric_status_code():
+    """API_QUEUE_RELEASED lifecycle payload carries the real HTTP status code on success.
+
+    Regression guard: before the fix the success branch called
+    ``_emit_queue_released()`` WITHOUT ``status_code``, so the payload always
+    carried ``status_code=None`` even on a clean 200 delivery.  The demo and
+    verify_staging_transaction script both assert
+    ``isinstance(status_code, int) and 200 <= status_code < 300``, so a ``None``
+    here produces a false "non-2xx" warning.
+    """
+    transport = FakeTransport()
+    bus = InProcessEventBus()
+    snap = load_snapshot(CONFIG)
+    cfg = SDKConfig(sdk_key="my-sdk-key")
+    tracker = Tracker(
+        snapshot=snap,
+        config=cfg,
+        transport=transport,
+        data_store=InMemoryDataStore(),
+        event_bus=bus,
+    )
+
+    released: List[Any] = []
+    bus.on(LifecycleEvent.API_QUEUE_RELEASED, lambda p, error=None: released.append(p))
+
+    tracker.track(visitor_id="v1", goal_key="purchase_completed")
+    tracker.flush()
+
+    assert len(released) == 1
+    payload = released[0]
+    assert isinstance(payload, QueueReleasedPayload)
+    # The key assertion: status_code must be the numeric 200 returned by send_tracking,
+    # never None on a successful delivery.
+    assert payload.status_code == 200

@@ -304,24 +304,26 @@ class Tracker:
         payload = self._build_batch_payload(items)
         transport = self._ensure_transport()
         try:
-            transport.send_tracking(payload, sdk_key=str(self._config.sdk_key))
+            status_code = transport.send_tracking(payload, sdk_key=str(self._config.sdk_key))
         except TrackingDeliveryError as error:
             # Delivery failed after the transport adapter exhausted its retries.
             # Surface the outcome via the lifecycle event + privacy-safe log,
             # then DROP the events (do not re-queue) and return without raising.
-            status_code = getattr(error, "status_code", None)
+            # Use a distinct name to avoid shadowing the success-path ``status_code``
+            # binding (mypy --strict flags a ``int`` ← ``Any | None`` assignment).
+            err_status_code: Optional[int] = getattr(error, "status_code", None)
             retry_attempts = getattr(error, "retry_attempts", None)
             log_tracking_delivery_failure(
                 reason=reason.value,
                 batch_size=event_count,
-                status_code=status_code,
+                status_code=err_status_code,
                 retry_attempts=retry_attempts,
             )
             self._emit_queue_released(
                 reason=reason,
                 event_count=event_count,
                 visitor_count=visitor_count,
-                status_code=status_code,
+                status_code=err_status_code,
                 retry_attempts=retry_attempts,
                 error=error,
             )
@@ -332,12 +334,14 @@ class Tracker:
             self._queue.restore(items)
             raise
 
-        # Delivery succeeded: report the success outcome.
+        # Delivery succeeded: report the success outcome (status_code is the
+        # 2xx returned by send_tracking — never None on the success path).
         log_queue_release_success(reason=reason.value, batch_size=event_count)
         self._emit_queue_released(
             reason=reason,
             event_count=event_count,
             visitor_count=visitor_count,
+            status_code=status_code,
         )
 
     def _emit_queue_released(
