@@ -83,28 +83,23 @@ def select_custom_segments(
     segments = _resolve_segments(snapshot, segment_keys)
 
     matched_ids: List[str] = []
+    matched = False  # JS/PHP `segmentsMatched` latch (segments-manager.ts:100-121)
     for segment in segments:
         rules = segment.get("rules")
-
-        # A rule-less segment matches unconditionally (story testing note: "a
-        # segment is added when its rule matches the rule input OR when no rule
-        # is present"). A segment WITH rules matches only when the rule input
-        # satisfies them via the Story 1.4 engine.
-        if not rules:
-            this_matched = True
-        else:
-            this_matched = is_rule_matched(segment_rule, rules)
-
-        if not this_matched:
-            continue
-
-        raw_id = segment.get("id")
-        if raw_id is None:
-            continue
-        segment_id = str(raw_id)
-        if segment_id in existing or segment_id in matched_ids:
-            # Duplicate id — skip (JS parity: customSegments.includes → no re-add).
-            continue
-        matched_ids.append(segment_id)
-
+        # Evaluate this segment's OWN rule only until the first match latches.
+        # A rule-less segment matches unconditionally (preserved Story 3.3 semantics);
+        # a rule-bearing segment uses the Story 1.4 engine.
+        if segment_rule is not None and not matched:
+            matched = True if not rules else is_rule_matched(segment_rule, rules)
+        # Once latched (or when no segment_rule is supplied), record subsequent
+        # segments WITHOUT re-evaluating their own rules — JS/PHP parity.
+        if segment_rule is None or matched:
+            raw_id = segment.get("id")
+            if raw_id is None:
+                continue
+            segment_id = str(raw_id)
+            if segment_id in existing or segment_id in matched_ids:
+                # Duplicate id — skip (JS parity: customSegments.includes -> no re-add).
+                continue
+            matched_ids.append(segment_id)
     return matched_ids

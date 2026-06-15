@@ -107,6 +107,27 @@ def test_select_custom_segments_multiple_keys_records_each_match():
     assert set(matched) == {"s_us", "s_all"}
 
 
+def test_select_custom_segments_latches_across_ordered_list():
+    # JS/PHP parity (segments-manager.ts:100-121): once an earlier segment's rule
+    # matches, the latch records SUBSEQUENT segments without re-evaluating their
+    # own rules. A US visitor querying [us-visitors, de-visitors] gets BOTH ids
+    # even though the DE rule does not match.
+    matched = select_custom_segments(
+        _snapshot(), ["us-visitors", "de-visitors"], {"country": "US"}, existing_ids=[]
+    )
+    assert matched == ["s_us", "s_de"]
+
+
+def test_select_custom_segments_latch_does_not_engage_before_first_match():
+    # Order matters: a LEADING non-matching segment does not latch. Querying
+    # [de-visitors, us-visitors] as a US visitor skips de-visitors (DE rule fails)
+    # and records only us-visitors once it matches.
+    matched = select_custom_segments(
+        _snapshot(), ["de-visitors", "us-visitors"], {"country": "US"}, existing_ids=[]
+    )
+    assert matched == ["s_us"]
+
+
 # --- Context.run_custom_segments public surface -----------------------------
 
 
