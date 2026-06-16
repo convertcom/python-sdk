@@ -111,18 +111,14 @@ _SHARED_STAGING_SDK_KEY = "10035569/10034190"
 # Experience key — JS: ../javascript-sdk/demo/nodejs/routes/events.js (experienceKey)
 EXPERIENCE_KEY = "test-experience-ab-fullstack-1"
 
-# Feature rollout key — PHP: ../php-sdk/demo/laravel/config/convert.php:7 (feature_rollout_key)
-# NOTE: In live staging topology this IS AN EXPERIENCE KEY, not a feature key.
-# The PHP demo calls sdkContext->runExperience(featureRolloutKey, ...) — NOT runFeature.
-# This mirrors the JS demo pattern too: sdkContext.runExperience(featureRolloutKey, ...).
-# The rollout experience carries a fullStackFeature change whose variables_data.caption
-# is the call-to-action label. Mirror this in Python: call run_experience(FEATURE_ROLLOUT_KEY).
-# STALE KEY: The JS demo's 'test-feature-rollout-1' is absent from the staging snapshot
-# (../javascript-sdk/packages/js-sdk/tests/integration/static-config.json has
-#  'test-experience-ab-fullstack-4' but no 'test-feature-rollout-1'). PHP is authoritative.
-# Override via CONVERT_DEMO_FEATURE_ROLLOUT_KEY env var.
+# Feature rollout key — JS: ../javascript-sdk/demo/nodejs/routes/events.js (featureRolloutKey)
+# The spec designates 'test-feature-rollout-1' as the feature key (JS is authoritative).
+# The Python demo calls run_feature(FEATURE_ROLLOUT_KEY) — resolving a declared feature
+# with typed variable casting (bool/string/integer). The feature is linked to experience
+# test-experience-ab-fullstack-1 via the variation's changes[].data.feature_id.
+# LIVE staging may carry a different key; override via CONVERT_DEMO_FEATURE_ROLLOUT_KEY.
 FEATURE_ROLLOUT_KEY = os.environ.get(
-    "CONVERT_DEMO_FEATURE_ROLLOUT_KEY", "test-experience-ab-fullstack-4"
+    "CONVERT_DEMO_FEATURE_ROLLOUT_KEY", "test-feature-rollout-1"
 )
 
 # Segment key — JS: ../javascript-sdk/demo/nodejs/routes/events.js (segmentsKey)
@@ -337,26 +333,23 @@ def _run_visitor_arc(
     as the per-call ``attributes=`` overlay so both the evaluation and the
     self-diagnosis calls use identical audience state.
     """
-    # Set default segments matching PHP ConvertContext.php:33
-    # setDefaultSegments(['country' => 'US']). These are DISTINCT from
-    # visitor_attributes — they feed reporting/attribution, not audience rules.
-    # Must be called before evaluations so segment state is present in the context.
-    _default_segs: Dict[str, Any] = {"country": "US"}
-    context.set_segments(_default_segs)
-    print(f"[0a] set_segments({_default_segs!r})  (default segments — PHP ConvertContext.php:33)")
-
-    # Apply audience attributes so the experience audience rules are satisfied.
-    # Live staging audience 10033684: OR[ AND[desktop==true, browser!="CH"] , AND[mobile==true] ]
-    context.set_attributes(audience_attrs)
-    print(f"[0b] set_attributes({audience_attrs!r})  (audience attrs for staging gating)")
-    print()
+    if is_live:
+        # Set default segments and audience attributes for LIVE staging only.
+        # Staging audience 10033684: OR[ AND[desktop==true, browser!="CH"] , AND[mobile==true] ]
+        # Not needed for OFFLINE (fixture is ungated; no audience rules).
+        _default_segs: Dict[str, Any] = {"country": "US"}
+        context.set_segments(_default_segs)
+        print(f"[0a] set_segments({_default_segs!r})  (default segments — LIVE staging)")
+        context.set_attributes(audience_attrs)
+        print(f"[0b] set_attributes({audience_attrs!r})  (audience attrs for staging gating)")
+        print()
 
     # --- Step 1: evaluate experience ---
     print(f"[1] run_experience({EXPERIENCE_KEY!r})")
     exp_result = context.run_experience(
         EXPERIENCE_KEY,
-        attributes=audience_attrs,
-        location_attributes=_LOCATION_ATTRS,
+        attributes=audience_attrs if is_live else {},
+        location_attributes=_LOCATION_ATTRS if is_live else {},
     )
     if exp_result is not None:
         print(f"    experience_key : {exp_result.experience_key}")
@@ -380,51 +373,40 @@ def _run_visitor_arc(
         )
     print()
 
-    # --- Step 2: resolve the feature rollout (as an EXPERIENCE) ---
-    # In live staging topology, test-experience-ab-fullstack-4 IS an experience key.
-    # Source: ../php-sdk/demo/laravel/app/Http/Controllers/EventsController.php:29-33
-    # (sdkContext->runExperience(featureRolloutKey, BucketingAttributes([locationProperties...])))
-    # JS note: JS demo also uses runExperience(featureRolloutKey, ...) — not runFeature.
-    # The bucketed variation's changes[0].data.variables_data.caption is the CTA label.
-    print(f"[2] run_experience({FEATURE_ROLLOUT_KEY!r})"
-          "  [feature rollout — bucketed as experience]")
-    rollout_result = context.run_experience(
+    # --- Step 2: resolve the feature (typed variables via run_feature) ---
+    # Source: ../javascript-sdk/demo/nodejs/routes/events.js (featureRolloutKey)
+    # The spec designates run_feature as the correct call — it resolves the declared
+    # feature definition and type-casts each variable (bool/string/integer).
+    print(f"[2] run_feature({FEATURE_ROLLOUT_KEY!r})")
+    from convert_sdk import FeatureResult  # noqa: F401 — used for type clarity
+    feature_result = context.run_feature(
         FEATURE_ROLLOUT_KEY,
-        attributes=audience_attrs,
-        location_attributes=_LOCATION_ATTRS,
+        attributes=audience_attrs if is_live else {},
+        location_attributes=_LOCATION_ATTRS if is_live else {},
     )
-    if rollout_result is not None:
-        print(f"    experience_key : {rollout_result.experience_key}")
-        print(f"    variation_key  : {rollout_result.variation_key}")
-        print(f"    variation_id   : {rollout_result.variation_id}")
-        # Read variables from the variation's fullStackFeature changes (JS demo pattern)
-        changes = rollout_result.variation.get("changes") or []
-        if changes:
-            vars_data = (changes[0].get("data") or {}).get("variables_data") or {}
-            if vars_data:
-                print("    variables_data (from variation changes[0]):")
-                for k, v in vars_data.items():
-                    print(f"      {k}: {v!r}")
-                caption = vars_data.get("caption")
-                if caption is not None:
-                    print(f"    callForActionLabel : {caption!r}")
-        else:
-            print("    (variation carries no fullStackFeature changes)")
+    if feature_result is not None:
+        print(f"    feature_key    : {feature_result.feature_key}")
+        print(f"    status         : {feature_result.status.value}")
+        print("    variables:")
+        for var_name, var_value in feature_result.variables.items():
+            print(f"      {var_name}: {var_value!r}  (type={type(var_value).__name__})")
+        print(f"    via experience : {feature_result.experience_key}")
+        print(f"    via variation  : {feature_result.variation_key}")
     else:
-        print("    result         : None (feature rollout experience not resolved)")
-        rollout_diag = context.diagnose_experience(
+        print(f"    result         : None (feature {FEATURE_ROLLOUT_KEY!r} not resolved)")
+        from convert_sdk import FeatureDiagnostic  # noqa: F401
+        feat_diag = context.diagnose_feature(
             FEATURE_ROLLOUT_KEY,
-            attributes=audience_attrs,
-            location_attributes=_LOCATION_ATTRS,
+            attributes=audience_attrs if is_live else {},
+            location_attributes=_LOCATION_ATTRS if is_live else {},
         )
-        print(f"    diagnose       : reason={rollout_diag.reason.value!r}")
-        print(f"    message        : {rollout_diag.message!r}")
-        if rollout_diag.details:
-            print(f"    details        : {dict(rollout_diag.details)!r}")
+        print(f"    diagnose       : reason={feat_diag.reason.value!r}")
+        print(f"    message        : {feat_diag.message!r}")
+        if feat_diag.details:
+            print(f"    details        : {dict(feat_diag.details)!r}")
         print(
-            "    NOTE: EXPERIENCE_NOT_FOUND means the live config has no experience\n"
-            "          with this key. Try CONVERT_DEMO_FEATURE_ROLLOUT_KEY to override.\n"
-            "          AUDIENCE_MISMATCH/LOCATION_MISMATCH: try CONVERT_DEMO_LOCATION."
+            "    NOTE: FEATURE_NOT_FOUND means the loaded config has no feature\n"
+            "          with this key. Try CONVERT_DEMO_FEATURE_ROLLOUT_KEY to override."
         )
     print()
 
