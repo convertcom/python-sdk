@@ -166,10 +166,10 @@ class TestOfflineFixture:
         )
 
         feature_keys = [f["key"] for f in fixture.get("features", [])]
-        assert "test-experience-ab-fullstack-4" in feature_keys, (
-            "Fixture must contain the real feature rollout key 'test-experience-ab-fullstack-4' "
-            "(PHP authoritative source: php-sdk/demo/laravel/config/convert.php:7). "
-            "Note: 'test-feature-rollout-1' was the stale JS-only key; PHP is canonical."
+        assert "test-feature-rollout-1" in feature_keys, (
+            "Fixture must contain the real feature rollout key 'test-feature-rollout-1' "
+            "(JS-authoritative source: javascript-sdk/demo/nodejs/routes/events.js featureRolloutKey). "
+            "The LIVE staging override is handled via CONVERT_DEMO_FEATURE_ROLLOUT_KEY env var."
         )
 
         goal_keys = [g["key"] for g in fixture.get("goals", [])]
@@ -195,20 +195,20 @@ class TestOfflineFixture:
             core.close()
 
     def test_fixed_visitor_resolves_feature_with_typed_variables(self):
-        """demo-visitor-001 must resolve test-experience-ab-fullstack-4 with typed vars.
+        """demo-visitor-001 must resolve test-feature-rollout-1 with typed vars.
 
-        The feature rollout key is 'test-experience-ab-fullstack-4' per the PHP demo
-        (php-sdk/demo/laravel/config/convert.php:7). The old JS key 'test-feature-rollout-1'
-        was stale and absent from the staging snapshot.
+        The feature rollout key is 'test-feature-rollout-1' per the JS demo
+        (javascript-sdk/demo/nodejs/routes/events.js featureRolloutKey).
+        JS is authoritative per the spec (qs-12).
         """
         from convert_sdk.domain.results import FeatureStatus
         fixture = _load_fixture()
         core = Core(SDKConfig(data=fixture)).initialize()
         try:
             context = core.create_context("demo-visitor-001")
-            feature = context.run_feature("test-experience-ab-fullstack-4")
+            feature = context.run_feature("test-feature-rollout-1")
             assert feature is not None, (
-                "demo-visitor-001 must resolve test-experience-ab-fullstack-4"
+                "demo-visitor-001 must resolve test-feature-rollout-1"
             )
             assert feature.status is FeatureStatus.ENABLED
             vars_ = dict(feature.variables)

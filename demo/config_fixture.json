@@ -1,5 +1,5 @@
 {
-  "_comment": "OFFLINE demo fixture using the real staging entity keys (F-066). Entity keys match ../javascript-sdk/demo/nodejs/routes/events.js and ../php-sdk/demo/laravel/config/convert.php. Account/project IDs are the shared public staging project (10035569/10034190). Experience, feature, segment, and goal IDs below are placeholder values used ONLY for deterministic offline evaluation — the LIVE run fetches the real IDs from the staging config endpoint. TOPOLOGY: test-experience-ab-fullstack-4 is modelled as an EXPERIENCE (a feature-rollout type), matching the live staging topology where the PHP demo calls runExperience('test-experience-ab-fullstack-4') and the JS demo also uses runExperience (not runFeature). Source: ../php-sdk/demo/laravel/config/convert.php:7 (feature_rollout_key). NOTE: the JS demo's 'test-feature-rollout-1' key is STALE — absent from ../javascript-sdk/packages/js-sdk/tests/integration/static-config.json. Both experiences and all features are UNGATED (no audience/location rules) so OFFLINE buckets deterministically regardless of the attributes/location passed by the demo.",
+  "_comment": "OFFLINE demo fixture using the real staging entity keys (F-066). Entity keys match ../javascript-sdk/demo/nodejs/routes/events.js and ../php-sdk/demo/laravel/config/convert.php. Account/project IDs are the shared public staging project (10035569/10034190). Experience, feature, segment, and goal IDs below are placeholder values used ONLY for deterministic offline evaluation — the LIVE run fetches the real IDs from the staging config endpoint. TOPOLOGY: test-feature-rollout-1 is modelled as a FEATURE (fullStackFeature), resolved via run_feature('test-feature-rollout-1'). The feature is linked to experience test-experience-ab-fullstack-1 via variation changes[].data.feature_id. Source: ../javascript-sdk/demo/nodejs/routes/events.js (featureRolloutKey) — JS is authoritative per the spec. The LIVE staging override is handled via the CONVERT_DEMO_FEATURE_ROLLOUT_KEY env var for LIVE mode if the live config carries a different key. Both the experience and the feature are UNGATED (no audience/location rules) so OFFLINE buckets deterministically regardless of the attributes/location passed by the demo.",
   "account_id": "10035569",
   "project": {
     "id": "10034190",
@@ -8,14 +8,13 @@
   "features": [
     {
       "id": "feature-rollout-4",
-      "key": "test-experience-ab-fullstack-4",
-      "name": "Test Experience AB FullStack 4 (Feature Rollout)",
+      "key": "test-feature-rollout-1",
+      "name": "Test Feature Rollout 1",
       "variables": [
         {"key": "enabled", "type": "boolean"},
         {"key": "headline", "type": "string"},
         {"key": "button_color", "type": "string"},
-        {"key": "max_items", "type": "integer"},
-        {"key": "caption", "type": "string"}
+        {"key": "max_items", "type": "integer"}
       ]
     }
   ],
@@ -39,8 +38,7 @@
                   "enabled": "false",
                   "headline": "Welcome to our site",
                   "button_color": "blue",
-                  "max_items": "5",
-                  "caption": "Click this"
+                  "max_items": "5"
                 }
               }
             }
@@ -60,57 +58,7 @@
                   "enabled": "true",
                   "headline": "Exclusive offer just for you!",
                   "button_color": "green",
-                  "max_items": "10",
-                  "caption": "Click that"
-                }
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "demo-rollout-exp-4",
-      "key": "test-experience-ab-fullstack-4",
-      "name": "Test Experience AB FullStack 4 (Rollout Experience)",
-      "variations": [
-        {
-          "id": "demo-rollout-var-original",
-          "key": "rollout-original",
-          "traffic_allocation": 50.0,
-          "changes": [
-            {
-              "id": "demo-rollout-change-original",
-              "type": "fullStackFeature",
-              "data": {
-                "feature_id": "feature-rollout-4",
-                "variables_data": {
-                  "enabled": "false",
-                  "headline": "Welcome to our site",
-                  "button_color": "blue",
-                  "max_items": "5",
-                  "caption": "Click this"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "id": "demo-rollout-var-treatment",
-          "key": "rollout-treatment",
-          "traffic_allocation": 50.0,
-          "changes": [
-            {
-              "id": "demo-rollout-change-treatment",
-              "type": "fullStackFeature",
-              "data": {
-                "feature_id": "feature-rollout-4",
-                "variables_data": {
-                  "enabled": "true",
-                  "headline": "Exclusive offer just for you!",
-                  "button_color": "green",
-                  "max_items": "10",
-                  "caption": "Click that"
+                  "max_items": "10"
                 }
               }
             }
