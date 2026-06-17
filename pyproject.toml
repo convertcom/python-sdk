@@ -99,6 +99,14 @@ select = ["E", "W", "F", "B", "SIM", "RUF"]
 #   SIM118/RUF059 - test-local style choices
 "tests/**" = ["B017", "RUF002", "E501", "SIM118", "RUF059"]
 "scripts/**" = ["B017", "B904", "E501"]
+# Build-time-generated TypedDict stubs (qs-13). These are produced by the
+# backend serving-spec codegen (generate-pyi.js) and committed verbatim — never
+# hand-edited (enforced by scripts/check_generated_pyi_header.py). Their line
+# length is content-dependent (e.g. the 10-value goal_type Literal exceeds 100
+# cols); generated artifacts are not held to the hand-written style gate, the
+# same way scripts/ and tests/ are scoped out above.
+#   E501 - generated discriminator Literal lines exceed line-length
+"src/convert_sdk/_generated/**" = ["E501"]
 
 # ---------------------------------------------------------------------------
 # mypy strict (qs-02). The gate runs strict on the shippable package. Story 5.1

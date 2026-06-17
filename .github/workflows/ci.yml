@@ -60,8 +60,12 @@ jobs:
         run: uv python install 3.13
       - name: Sync dev environment
         run: uv sync --group dev
+      - name: Check generated .pyi header markers
+        run: uv run python scripts/check_generated_pyi_header.py
       - name: mypy strict
         run: uv run mypy --strict
+      - name: mypy strict (serving_config contract probe)
+        run: uv run mypy --strict typecheck/serving_config_contract.py
 
   test:
     name: test (py${{ matrix.python-version }} / ${{ matrix.os }})
