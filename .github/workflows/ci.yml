@@ -157,7 +157,13 @@ jobs:
         run: uv python install 3.13
       - name: Sync dev environment
         run: uv sync --group dev
+      # Auto-generated serving-config stub PRs (branch api-serving-pyi-update-*,
+      # opened by the backend update-api-clients-serving.yml workflow) carry no
+      # changelog fragment by design — matching ruby-sdk/php-sdk, which have no
+      # changelog gate on their equivalent auto-PRs. Guard the STEP (not the job)
+      # so the job still reports success if this check is required by branch protection.
       - name: Require a changelog fragment (towncrier)
+        if: ${{ !startsWith(github.head_ref, 'api-serving-pyi-update-') }}
         run: uv run towncrier check --compare-with origin/${{ github.base_ref }}
 
   build:
