@@ -116,7 +116,7 @@ follow_imports = "silent"
 follow_imports_for_stubs = false
 
 [[tool.mypy.overrides]]
-module = ["click.*", "towncrier.*"]
+module = ["click.*", "towncrier.*", "anyio.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
