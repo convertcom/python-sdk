@@ -1,70 +1,99 @@
-# Tag-triggered release + PyPI publish for the Convert Python SDK
-# (Story 5.1, qs-11 / qs-10).
-#
-# Trigger: a `v*` tag push only (e.g. v0.1.0, v0.1.0rc1). On any other event this
-# workflow is a no-op (it has no other triggers).
-#
-# Flow: CI gate (reuses ci.yml) -> verify version matches the tag -> compile the
-# towncrier changelog -> uv build -> publish to PyPI via OIDC Trusted Publishing
-# (NO long-lived tokens) -> create a GitHub Release with the compiled changelog.
 name: Release
 
+# Triggered by a successful "CI" run on `main`, via `workflow_run`. Guarantees
+# the full CI gate passed before publishing. WORKFLOW-NAME COUPLING
+# (LOAD-BEARING): the value below must match ci.yml's `name:` EXACTLY ("CI").
+# Renaming either side silently breaks releases — `workflow_run` would never
+# fire. ci.yml carries the mirror comment.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    branches: [main]
 
-permissions:
-  contents: read
+# Serialize releases. If two pushes land on main in quick succession, the second
+# workflow_run waits for the first to finish — we must not have two publish runs
+# racing to upload the same version or two @semantic-release/github instances
+# racing to create the tag + Release.
+# `cancel-in-progress: false` because cancelling a mid-publish workflow can
+# leave a half-published state that needs manual cleanup.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  # Reuse the full CI pipeline as the release gate. If any matrix cell, lint,
-  # type-check, bounds-check, or build fails, the downstream publish never runs.
-  ci-gate:
-    name: CI gate
-    uses: ./.github/workflows/ci.yml
-
-  build:
-    name: Build release artifacts
+  prepare:
+    name: Compute version + build
     runs-on: ubuntu-latest
-    needs: ci-gate
+    # Twin guards (both required):
+    #   (1) workflow_run.conclusion == 'success' → CI actually passed
+    #       (workflow_run fires on `completed` regardless of outcome).
+    #   (2) workflow_run.event == 'push' → the CI run that triggered us was on a
+    #       push to main, not a pull_request. FORK PRs fire `pull_request` events
+    #       and do NOT carry secret/OIDC access; triggering release on them would
+    #       fail or risk leaking into PR logs. DO NOT REMOVE THIS GUARD.
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    permissions:
+      contents: write   # semantic-release --dry-run verifies push permission (no actual push)
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      released: ${{ steps.sr.outputs.released }}
+      version:  ${{ steps.sr.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
+          # semantic-release analyzes all commits since the last tag; the
+          # default shallow clone (depth 1) would blind it.
           fetch-depth: 0
+          # Required so semantic-release can verify push permission.
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Enable corepack (Yarn from the lockfile dialect)
+        run: corepack enable
+
+      - name: Install Node release tooling
+        run: yarn install --immutable
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: "0.10.11"
           enable-cache: true
+
       - name: Set up Python
         run: uv python install 3.13
-      - name: Sync dev environment
-        run: uv sync --group dev
-      - name: Verify tag matches the package version
-        id: version
-        shell: bash
+
+      # Dry-run: verifyReleaseCmd (release.config.mjs) exports version + writes
+      # notes file.
+      - name: semantic-release (dry-run → compute version + notes)
+        id: sr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_FILE: ${{ github.workspace }}/release-notes.md
+        run: yarn release:dry-run
+
+      # Only when a release is due:
+      - name: Stamp version into version.py (UNCOMMITTED) + build
+        if: steps.sr.outputs.released == 'true'
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(uv run python -c 'from convert_sdk.version import __version__; print(__version__)')"
-          echo "tag=$tag pkg=$pkg"
-          if [ "$tag" != "$pkg" ]; then
-            echo "::error::tag ($tag) does not match package version ($pkg)"
-            exit 1
-          fi
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
-      - name: Compile changelog from towncrier fragments
-        run: uv run towncrier build --yes --version "${{ steps.version.outputs.version }}"
-      - name: Extract release notes for this version
-        run: >-
-          uv run python scripts/extract_release_notes.py
-          --version "${{ steps.version.outputs.version }}"
-          --output release-notes.md
-      - name: Build wheel + sdist
-        run: uv build
-      - name: Upload build artifacts
+          python - <<'PY'
+          import pathlib, os, re
+          v = os.environ["VERSION"]
+          f = pathlib.Path("src/convert_sdk/version.py")
+          f.write_text(re.sub(r'__version__ = "[^"]*"', f'__version__ = "{v}"', f.read_text()))
+          PY
+          uv build
+        env:
+          VERSION: ${{ steps.sr.outputs.version }}
+
+      - name: Upload dist + notes
+        if: steps.sr.outputs.released == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-dist
@@ -76,56 +105,59 @@ jobs:
   publish-pypi:
     name: Publish to PyPI (OIDC)
     runs-on: ubuntu-latest
-    needs: build
+    needs: prepare
+    if: needs.prepare.outputs.released == 'true'
+    # OIDC Trusted Publishing — the whole job runs in the `pypi` environment so
+    # the OIDC subject claim matches the registered Trusted Publisher
+    # (owner: convertcom/python-sdk, workflow: release.yml, env: pypi).
+    # This environment MUST have no required reviewers/wait timers, else the
+    # publish job blocks. See RELEASE.md One-Time Setup.
     environment:
       name: pypi
       url: https://pypi.org/p/convert-python-sdk
     permissions:
-      # OIDC Trusted Publishing requires id-token: write. NO PyPI tokens are
-      # stored in repository secrets (qs-11 Critical Warning #1).
-      id-token: write
+      id-token: write   # OIDC Trusted Publishing — NO PyPI tokens in secrets
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: release-dist
-      - name: Publish distributions to PyPI
-        # Trusted Publisher must be configured on pypi.org for this repo +
-        # workflow (one-time manual step — see docs/release-process.md). No
-        # password/token input: the action exchanges the OIDC token.
-        uses: pypa/gh-action-pypi-publish@release/v1
+
+      # Trusted Publisher must be configured on pypi.org for this repo +
+      # workflow + environment (one-time manual step — see RELEASE.md).
+      # No password/token input: the action exchanges the OIDC token.
+      - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
 
-  github-release:
-    name: Create GitHub Release
+  release:
+    name: Tag + GitHub Release (semantic-release)
     runs-on: ubuntu-latest
-    needs: [build, publish-pypi]
+    # publish-before-release: skipped if PyPI upload failed (needs both jobs).
+    needs: [prepare, publish-pypi]
+    if: needs.prepare.outputs.released == 'true'
     permissions:
-      contents: write
+      contents: write   # push vX.Y.Z tag + create the GitHub Release
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: release-dist
-      - name: Determine prerelease flag
-        id: prerelease
-        shell: bash
-        run: |
-          tag="${GITHUB_REF_NAME}"
-          # Mark a/b/rc/dev/alpha/beta tags as prereleases on the GitHub Release.
-          if echo "$tag" | grep -Eiq '(a|b|rc|dev|alpha|beta)[0-9]*$'; then
-            echo "flag=--prerelease" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Create the GitHub Release with the compiled changelog
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install Node release tooling
+        run: yarn install --immutable
+
+      # Real run: re-derives the SAME version (deterministic — no commit landed
+      # since prepare), prepareCmd re-stamps version.py (harmless),
+      # @semantic-release/github pushes the tag + creates the Release.
+      - name: semantic-release (tag + GitHub Release)
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "${GITHUB_REF_NAME}"
-          --repo "${GITHUB_REPOSITORY}"
-          --title "${GITHUB_REF_NAME}"
-          --notes-file release-notes.md
-          ${{ steps.prerelease.outputs.flag }}
-          dist/*
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: yarn release

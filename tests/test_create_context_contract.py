@@ -7,7 +7,7 @@ creation boundary; this drift must not reappear, because it would propagate
 through epic-2+.
 
 These tests pin the creation contract on both ``Core.create_context`` and the
-``Context`` constructor, and guard the onboarding docs/examples so the README
+``Context`` constructor, and guard the onboarding examples so the README
 and example files keep documenting the frozen ``visitor_attributes=`` name at
 the creation boundary rather than the old ``attributes=`` creation keyword.
 """

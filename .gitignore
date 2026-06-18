@@ -35,3 +35,9 @@ scripts/verify_staging_transaction.py
 
 # Demo harness local credentials (never committed)
 demo/.env
+
+# Node release tooling (dev-only — never ships in the wheel/sdist)
+# package.json / release.config.mjs / yarn.lock / .yarnrc.yml ARE committed;
+# node_modules and the Yarn install-state cache are not (ruby-sdk parity).
+node_modules/
+.yarn/

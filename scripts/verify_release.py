@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run every release gate locally, mirroring CI (Story 5.1, qs-02/03/09/11).
+"""Run every release gate locally, mirroring CI (Story 5.1, qs-02/03/09).
 
 This is the maintainer's single green-bar command: it reproduces the gates that
 `.github/workflows/ci.yml` enforces, so a release candidate can be validated on
-a workstation before a `v*` tag is pushed. Each gate runs in sequence; the
-script reports a per-gate PASS/FAIL summary and exits non-zero if ANY gate fails.
+a workstation before merging a qualifying Conventional Commit PR. Each gate runs
+in sequence; the script reports a per-gate PASS/FAIL summary and exits non-zero
+if ANY gate fails.
 
 Gates, in order:
     1. Ruff lint          (E/W/F/B/SIM/RUF on src + tests + scripts)
@@ -12,12 +13,10 @@ Gates, in order:
     3. pytest + coverage  (full suite; project floor 85%)
     4. evaluation/ floor  (evaluation modules >= 95%)
     5. parity suite       (tests/parity/ must pass 100% — release-blocking)
-    6. towncrier draft    (fragments compile into a valid changelog draft)
-    7. uv build           (wheel + sdist build cleanly)
+    6. uv build           (wheel + sdist build cleanly)
 
 Usage:
     python scripts/verify_release.py
-    python scripts/verify_release.py --version 0.1.0   # towncrier draft version
     python scripts/verify_release.py --skip-build      # skip the slow uv build
 
 Exit codes:
@@ -106,11 +105,6 @@ def _evaluation_coverage_gate(runner: Runner) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--version",
-        default="0.0.0",
-        help="Version passed to the towncrier draft build (default: 0.0.0).",
-    )
-    parser.add_argument(
         "--skip-build",
         action="store_true",
         help="Skip the (slow) uv build gate.",
@@ -126,10 +120,6 @@ def main(argv: list[str] | None = None) -> int:
     runner.run(
         "parity suite (release-blocking)",
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "tests/parity", "-x"],
-    )
-    runner.run(
-        "towncrier draft",
-        ["towncrier", "build", "--draft", "--version", args.version],
     )
     if not args.skip_build:
         runner.run("uv build (wheel + sdist)", ["uv", "build"])

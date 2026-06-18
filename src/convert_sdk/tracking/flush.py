@@ -30,8 +30,8 @@ Runtime-lifecycle decisions (architecture #Queue-Lifecycle-and-Python-Runtime-Ma
   serverless runtimes. Never rely on it as the sole delivery path.
 
 SIGTERM handling is intentionally NOT auto-registered (Critical Warning #6); the
-recommended pattern is documented as a code comment below and in
-``docs/runtime-integration.md`` so containerized deployments can opt in
+recommended pattern is documented as a code comment below and in the project
+wiki (runtime-integration guidance) so containerized deployments can opt in
 explicitly without the SDK installing surprising process-level signal handlers.
 """
 
@@ -123,7 +123,7 @@ def register_atexit_flush(flushable: Flushable) -> Callable[[], None]:
 #         raise SystemExit(0)
 #     signal.signal(signal.SIGTERM, _handle_sigterm)
 #
-# See docs/runtime-integration.md for per-runtime guidance.
+# See the project wiki for per-runtime guidance.
 # ---------------------------------------------------------------------------
 
 

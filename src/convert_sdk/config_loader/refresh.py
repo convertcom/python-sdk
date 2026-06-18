@@ -6,9 +6,9 @@ Protocol used at initialization (Story 1.2 — no parallel transport) and the
 **same** :func:`~convert_sdk.config_loader.loader.load_snapshot` pipeline
 (validation + normalization + immutable snapshot construction). A successfully
 loaded snapshot is handed to the ``on_snapshot`` callback, which performs the
-atomic swap on :class:`~convert_sdk.core.Core` (see ADR 0001).
+atomic swap on :class:`~convert_sdk.core.Core`.
 
-Design (see ``docs/adr/0001-config-refresh-concurrency-and-backoff.md``):
+Design:
 
 * **Opt-in only.** Nothing here runs unless ``SDKConfig.refresh`` is a
   :class:`~convert_sdk.config.RefreshConfig`. ``refresh=None`` constructs no
