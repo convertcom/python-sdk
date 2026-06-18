@@ -90,8 +90,8 @@ class ConfigExperienceSettingsSplitUrlSettings(TypedDict, total=False):
     split_regex_support: Optional[bool]
 
 class ConfigExperienceSettingsMatchingOptions(TypedDict, total=False):
-    audiences: Optional[Any]
-    locations: Optional[Any]
+    audiences: Optional[str]
+    locations: Optional[str]
 
 class ConfigExperienceSettings(TypedDict, total=False):
     min_order_value: Optional[float]
@@ -110,10 +110,10 @@ class ConfigExperience(TypedDict, total=False):
     audiences: Optional[List[str]]
     goals: Optional[List[str]]
     multipage_pages: Optional[List[Any]]
-    status: Optional[Any]
+    status: Optional[str]
     global_js: Optional[str]
     global_css: Optional[str]
-    type: Optional[Any]
+    type: Optional[str]
     version: Optional[float]
     variations: Optional[List[ExperienceVariation]]
     integrations: Optional[List[Any]]
@@ -126,7 +126,7 @@ class ExperienceVariation(TypedDict, total=False):
     name: Optional[str]
     key: Optional[str]
     traffic_allocation: Optional[float]
-    status: Optional[Any]
+    status: Optional[str]
     changes: Optional[List[FeatureChangeData]]
 
 class FeatureChangeDataData(TypedDict, total=False):
@@ -149,7 +149,7 @@ class ConfigAudience(TypedDict, total=False):
     id: Optional[str]
     key: Optional[str]
     name: Optional[str]
-    type: Optional[Any]
+    type: Optional[str]
     rules: Optional[Any]
 
 class ConfigLocation(TypedDict, total=False):
@@ -177,7 +177,7 @@ class FeatureVariable(TypedDict, total=False):
 
 class ExperienceIntegrationGaServing(TypedDict, total=False):
     enabled: Optional[bool]
-    provider: Optional[Any]
+    provider: Optional[str]
     type: Optional[Literal["ga3", "ga4"]]
     measurementId: Optional[str]
 
