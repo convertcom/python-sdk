@@ -1,5 +1,5 @@
 [![CI](https://github.com/convertcom/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/convertcom/python-sdk/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/convert-python-sdk)](https://pypi.org/project/convert-python-sdk/)
+[![PyPI version](https://img.shields.io/pypi/v/convert-python-sdk.svg)](https://pypi.org/project/convert-python-sdk/)
 
 # Convert Python SDK
 
