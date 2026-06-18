@@ -16,7 +16,7 @@ carries the partial cross-SDK-comparable field set IN SCOPE for 4.3:
 Deferred (NOT exercised here): ``config_version``, ``bucketing_inputs``
 (key/traffic/seed/salt), ``experience_key`` completion (Story 4.5); the
 parity-comparison helper + diagnostic-vector fixtures (Story 5.1); the formal
-byte-comparable contract document ``docs/debugging.md`` (Story 4.5).
+byte-comparable contract (Story 4.5; see the project wiki Diagnostics page).
 
 Guardrails (driver scope + story Architecture): there is NO ``diagnostics.py``
 module, NO ``events.visitor_reference`` helper. The comparable fields live in

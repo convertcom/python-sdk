@@ -1,3 +1,6 @@
+[![CI](https://github.com/convertcom/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/convertcom/python-sdk/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/convert-python-sdk)](https://pypi.org/project/convert-python-sdk/)
+
 # Convert Python SDK
 
 The Convert Experiences FullStack SDK for Python — server-side A/B testing,
@@ -198,8 +201,8 @@ core.flush()
 
 Choosing *when* to flush depends on your runtime (Lambda, Cloud Run, gunicorn,
 uvicorn, Celery, CLI). The default lifecycle is **explicit-flush-only**, which is
-safe everywhere. See **[`docs/runtime-integration.md`](docs/runtime-integration.md)**
-for a per-runtime decision table and copy-pasteable flush snippets, including the
+safe everywhere. See the **[project wiki](https://github.com/convertcom/python-sdk/wiki)**
+for per-runtime decision tables and copy-pasteable flush snippets, including the
 opt-in daemonic periodic timer (`SDKConfig.auto_flush_interval_ms`), the
 best-effort `atexit` hook, and the documented SIGTERM pattern.
 
@@ -220,19 +223,12 @@ credentials.
 
 ## Documentation
 
-The advanced guides live under [`docs/`](docs/index.md) — start at the
-[documentation index](docs/index.md). Highlights:
+The advanced guides live on the **[project wiki](https://github.com/convertcom/python-sdk/wiki)**:
 
-- **Topic guides:** [Initialization](docs/initialization.md),
-  [Evaluation](docs/evaluation.md), [Tracking](docs/tracking.md),
-  [Queue control](docs/queue-control.md), [Debugging](docs/debugging.md),
-  [Extending](docs/extending.md), [Support workflows](docs/support-workflows.md),
-  [Runtime integration](docs/runtime-integration.md)
-- **Migration guides:** [Migrating from raw REST](docs/migration-from-rest.md),
-  [Migrating from the JavaScript SDK](docs/migration-from-javascript.md)
-
-Every code sample in those guides is executed against the current public API by
-the test suite, so the documentation cannot drift from the implementation.
+- **Topic guides:** Initialization, Evaluation, Tracking, Queue control,
+  Debugging, Extending, Support workflows, Runtime integration
+- **Migration guides:** Migrating from raw REST, Migrating from the JavaScript
+  SDK
 
 ## Public API
 
@@ -252,7 +248,7 @@ This project uses [uv](https://docs.astral.sh/uv/) and the `hatchling` build
 backend.
 
 ```bash
-# Install dev tooling (pytest, ruff, mypy, towncrier, coverage)
+# Install dev tooling (pytest, ruff, mypy, coverage)
 uv sync --group dev
 
 # Run the test suite
@@ -269,36 +265,23 @@ uv build
 Every change runs through CI (`.github/workflows/ci.yml`): Ruff lint, mypy
 `--strict`, a 15-cell test matrix (Python 3.9–3.13 × {ubuntu, macos, windows})
 with an 85% project / 95% `evaluation/` coverage floor, a release-blocking parity
-suite, a dependency-bounds check, a changelog-fragment check, and a build. PRs
-with user-visible impact must add a [changelog fragment](changes/README.md).
+suite, and a dependency-bounds check.
 
 Reproduce all the release gates locally in one command:
 
 ```bash
-python scripts/verify_release.py --version 0.1.0
+python scripts/verify_release.py
 ```
 
 ## Releasing
 
-The SDK publishes to PyPI as **`convert-python-sdk`** via a tag-triggered GitHub
-Actions workflow using **OIDC Trusted Publishing** — there are no long-lived PyPI
-tokens in repository secrets.
+The SDK publishes to PyPI as **`convert-python-sdk`** via a `workflow_run`-
+triggered GitHub Actions workflow using **OIDC Trusted Publishing** — there are
+no long-lived PyPI tokens in repository secrets.
 
-```bash
-# 1. Bump src/convert_sdk/version.py, then validate locally:
-python scripts/verify_release.py --version 0.1.0
-
-# 2. Merge the version bump to main (CI must be green), then tag and push:
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Pushing a `v*` tag re-runs the full CI gate, compiles the towncrier changelog,
-builds the wheel + sdist, publishes to PyPI via OIDC, and creates a GitHub
-Release with the compiled changelog. The complete maintainer workflow — including
-the one-time PyPI Trusted Publisher setup, dependency-bounds policy, and
-parity-fixture regeneration — is documented in
-[`docs/release-process.md`](docs/release-process.md).
+Releases are fully automatic: merge a Conventional-Commit PR to `main` and the
+pipeline handles the rest. See **[RELEASE.md](RELEASE.md)** for the full
+maintainer workflow, one-time setup, dry-run instructions, and troubleshooting.
 
 ## License
 

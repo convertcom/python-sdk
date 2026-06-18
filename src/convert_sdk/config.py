@@ -115,9 +115,8 @@ class RefreshConfig:
     (``SDKConfig.refresh=None``) is byte-for-byte MVP behavior: no daemon thread,
     no diagnostic events, and zero added cost.
 
-    Every concrete numeric default below is ratified in
-    ``docs/adr/0001-config-refresh-concurrency-and-backoff.md`` (audit F-028 —
-    architecture defers backoff parameters to a Phase-2 ADR).
+    Every concrete numeric default below is a ratified design decision (audit
+    F-028 — architecture defers backoff parameters to a Phase-2 ADR).
 
     Args:
         interval_seconds: Base period between successful refresh attempts.

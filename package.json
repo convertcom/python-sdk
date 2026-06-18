@@ -1,0 +1,16 @@
+{
+  "name": "convert-python-sdk-release-tooling",
+  "private": true,
+  "description": "Release automation tooling for the Convert Python SDK (semantic-release). Dev-only — the published wheel/sdist keeps httpx as the only runtime dependency and contains no Node artifacts (pyproject.toml excludes package.json / release.config.mjs / yarn.lock / node_modules from the sdist, and the wheel target is packages = [\"src/convert_sdk\"]).",
+  "scripts": {
+    "release": "semantic-release",
+    "release:dry-run": "semantic-release --dry-run --no-ci"
+  },
+  "devDependencies": {
+    "@semantic-release/exec": "^7.0.0",
+    "@semantic-release/github": "^11.0.0",
+    "@semantic-release/release-notes-generator": "^14.0.0",
+    "conventional-changelog-conventionalcommits": "^8.0.0",
+    "semantic-release": "^24.0.0"
+  }
+}

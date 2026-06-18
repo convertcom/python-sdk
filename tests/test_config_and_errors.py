@@ -35,10 +35,12 @@ def test_config_and_error_symbols_importable():
 
 
 def test_story_1_1_boundary_preserved():
-    """The frozen Story 1.1 trio must still import unchanged."""
+    """The frozen Story 1.1 trio must still import unchanged. __version__ holds
+    the dev placeholder '0.0.0' in the source tree; the release pipeline stamps
+    the real version at build time (uncommitted)."""
     from convert_sdk import Context, Core, __version__  # noqa: F401
 
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.0.0"
 
 
 def test_sdkconfig_accepts_sdk_key():

@@ -1,19 +1,22 @@
-# CI pipeline for the Convert Python SDK (Story 5.1, qs-02 / qs-03 / qs-09 / qs-10).
+# CI pipeline for the Convert Python SDK (Story 5.1, qs-02 / qs-03 / qs-09).
 #
 # Job graph (fail-fast lint/type-check before the matrix):
+#   pr-title (PR-only, independent)
 #   lint -> type-check -> test (15-cell matrix) -> build
 #                      \-> bounds-check (lower/upper)
-#   changelog (PR-only, independent)
 #
-# All dependency resolution uses `uv` (never `pip install -e .`). The workflow is
-# `workflow_call`-able so release.yml can reuse it verbatim as the release gate.
+# All dependency resolution uses `uv` (never `pip install -e .`).
+#
+# WORKFLOW-NAME COUPLING (LOAD-BEARING): the `name: CI` below must match
+# release.yml's `workflow_run.workflows` value EXACTLY ("CI"). Renaming either
+# side silently breaks releases — `workflow_run` would never fire. release.yml
+# carries the mirror comment.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
-  workflow_call: {}
 
 # Cancel superseded runs on the same ref to keep the matrix under the merge ceiling.
 concurrency:
@@ -28,6 +31,25 @@ env:
   UV_VERSION: "0.10.11"
 
 jobs:
+  pr-title:
+    name: PR title (Conventional Commits)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Dependency-free Conventional Commits check (squash-merge-only repo:
+          # the squash commit subject is the PR title).
+          if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|docs|test|refactor|perf|build|ci|chore)(\(.+\))?!?: .+'; then
+            echo "::error::PR title must follow Conventional Commits: '$PR_TITLE'"
+            echo "Expected: <type>(<scope>)?!?: <description>"
+            echo "Allowed types: feat, fix, docs, test, refactor, perf, build, ci, chore"
+            exit 1
+          fi
+          echo "PR title OK: $PR_TITLE"
+
   lint:
     name: Ruff lint
     runs-on: ubuntu-latest
@@ -137,34 +159,6 @@ jobs:
       - name: Run unit + integration suite (parity covered elsewhere)
         run: >-
           uv run pytest -p no:cacheprovider --ignore=tests/parity
-
-  changelog:
-    name: changelog fragment
-    runs-on: ubuntu-latest
-    # Only meaningful on PRs (push to main happens after merge, when the fragment
-    # has already been validated). Non-blocking on release/tag refs.
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-      - name: Set up Python
-        run: uv python install 3.13
-      - name: Sync dev environment
-        run: uv sync --group dev
-      # Auto-generated serving-config stub PRs (branch api-serving-pyi-update-*,
-      # opened by the backend update-api-clients-serving.yml workflow) carry no
-      # changelog fragment by design — matching ruby-sdk/php-sdk, which have no
-      # changelog gate on their equivalent auto-PRs. Guard the STEP (not the job)
-      # so the job still reports success if this check is required by branch protection.
-      - name: Require a changelog fragment (towncrier)
-        if: ${{ !startsWith(github.head_ref, 'api-serving-pyi-update-') }}
-        run: uv run towncrier check --compare-with origin/${{ github.base_ref }}
 
   build:
     name: build (wheel + sdist)

@@ -1,1 +1,0 @@
-Establish the maintainer release and parity-validation workflow: GitHub Actions CI (lint, type-check, 3.9-3.13 × {ubuntu, macos, windows} test matrix, dependency-bounds check, coverage and parity gates), tag-triggered PyPI publishing via OIDC Trusted Publishing, and towncrier-managed changelog discipline.

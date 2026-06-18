@@ -17,11 +17,13 @@ def test_public_symbols_importable():
     assert isinstance(__version__, str)
 
 
-def test_version_is_frozen_value():
-    """Story 1.1 freezes the initial version at 0.1.0."""
+def test_version_is_dev_placeholder():
+    """The dev placeholder in version.py is '0.0.0'; the real version is
+    stamped by the release pipeline at build time (semantic-release prepareCmd)
+    and is never committed. This test confirms the placeholder is consistent."""
     from convert_sdk import __version__
 
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.0.0"
 
 
 def test_version_single_sourced():

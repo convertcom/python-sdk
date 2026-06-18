@@ -52,13 +52,16 @@ def test_requires_python_floor_is_39():
 
 
 def test_installed_metadata_matches_when_available():
-    """When installed, importlib.metadata must report the canonical name and
-    version. Skips gracefully if the package is not installed in the env."""
+    """When installed, importlib.metadata must report the canonical name and a
+    version that matches convert_sdk.__version__ (the single source of truth).
+    Skips gracefully if the package is not installed in the env."""
     try:
         dist = importlib_metadata.distribution("convert-python-sdk")
     except importlib_metadata.PackageNotFoundError:
         import pytest
 
         pytest.skip("convert-python-sdk not installed in this environment")
+    from convert_sdk import __version__
+
     assert dist.metadata["Name"] == "convert-python-sdk"
-    assert dist.version == "0.1.0"
+    assert dist.version == __version__
