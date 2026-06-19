@@ -41,13 +41,13 @@ from convert_sdk.config_loader import load_snapshot
 
 def _import_bucketing_event():
     """Lazy import of Story 2.5 BucketingEvent domain type."""
-    from convert_sdk.domain.results import BucketingEvent  # noqa: PLC0415
+    from convert_sdk.domain.results import BucketingEvent
     return BucketingEvent
 
 
 def _import_build_bucketing_payload():
     """Lazy import of Story 2.5 build_bucketing_payload serializer."""
-    from convert_sdk.tracking.payloads import build_bucketing_payload  # noqa: PLC0415
+    from convert_sdk.tracking.payloads import build_bucketing_payload
     return build_bucketing_payload
 
 

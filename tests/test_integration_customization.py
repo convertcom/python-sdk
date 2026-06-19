@@ -195,7 +195,12 @@ def test_custom_transport_replaces_httpx_end_to_end_preserving_semantics():
         payload, sdk_key = transport.deliveries[0]
         assert sdk_key == "k"
         events = payload["visitors"][0]["events"]
-        assert events[0]["data"]["goalId"] == "g1"
+        # Story 2.5: run_experiences() enqueues a bucketing event before the
+        # conversion event, so find the conversion event by eventType rather
+        # than assuming position 0.
+        conversion_events = [e for e in events if e.get("eventType") == "conversion"]
+        assert len(conversion_events) == 1
+        assert conversion_events[0]["data"]["goalId"] == "g1"
 
         # A second flush on the now-empty queue is a safe no-op (no extra
         # delivery) — queue-release semantics unchanged.

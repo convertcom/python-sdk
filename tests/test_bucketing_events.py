@@ -61,13 +61,13 @@ def _import_new_symbols():
     build_bucketing_payload, bucketing_marker_key, evaluate_bucketing_dedup.
     Raises ImportError when the production code is absent (RED phase).
     """
-    from convert_sdk.events import BucketingEventPayload  # noqa: PLC0415
-    from convert_sdk.domain.results import BucketingEvent  # noqa: PLC0415
-    from convert_sdk.tracking.payloads import build_bucketing_payload  # noqa: PLC0415
-    from convert_sdk.tracking.deduplication import (  # noqa: PLC0415
+    from convert_sdk.domain.results import BucketingEvent
+    from convert_sdk.events import BucketingEventPayload
+    from convert_sdk.tracking.deduplication import (
         bucketing_marker_key,
         evaluate_bucketing_dedup,
     )
+    from convert_sdk.tracking.payloads import build_bucketing_payload
     return {
         "BucketingEventPayload": BucketingEventPayload,
         "BucketingEvent": BucketingEvent,

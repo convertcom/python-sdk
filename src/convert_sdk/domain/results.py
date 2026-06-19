@@ -309,6 +309,28 @@ class EntityDiagnostic(_Diagnostic):
 
 
 @dataclass(frozen=True)
+class BucketingEvent:
+    """An in-process bucketing activation event tied to a visitor and experience.
+
+    Story 2.5 creates this locally when a visitor is bucketed into a variation —
+    it carries the stable identity fields needed for later payload shaping. Parallel
+    to :class:`ConversionEvent` but simpler: no revenue, no goalData, no segments
+    here (those are conversion-only concerns). All fields stay **snake_case internal**
+    — no wire-name mapping happens on this value object (that is the serializer's
+    sole job, per the architecture's data boundary).
+
+    Attributes:
+        visitor_id: The visitor the bucketing is attributed to.
+        experience_id: The resolved experience's id (stable downstream identity).
+        variation_id: The selected variation's id.
+    """
+
+    visitor_id: str
+    experience_id: str
+    variation_id: str
+
+
+@dataclass(frozen=True)
 class CustomSegmentsResult:
     """The typed outcome of :meth:`convert_sdk.context.Context.run_custom_segments`.
 

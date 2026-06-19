@@ -416,6 +416,7 @@ class Context:
         *,
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
+        enable_tracking: bool = True,
     ) -> Optional[ExperienceResult]:
         """Evaluate a single experience by key for this visitor.
 
@@ -425,6 +426,19 @@ class Context:
         qualifies and buckets into a variation, or ``None`` for any normal miss
         (missing experience, unqualified visitor, no active variation). Never
         raises for normal evaluation outcomes and performs no network I/O.
+
+        Args:
+            experience_key: The experience key to evaluate.
+            attributes: Optional per-call visitor attribute overlay (ephemeral).
+            location_attributes: Optional per-call location attribute overlay
+                (ephemeral).
+            enable_tracking: When ``True`` (the default), a successfully-bucketed
+                result enqueues a bucketing activation event via the tracker
+                (Story 2.5). When ``False``, no bucketing event is enqueued and
+                no ``LifecycleEvent.BUCKETING`` is emitted. The returned
+                :class:`~convert_sdk.domain.results.ExperienceResult` is
+                identical regardless of this flag — it gates tracking only, not
+                evaluation. Must be passed as a keyword argument.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -436,6 +450,12 @@ class Context:
             location_attributes=location,
         )
         self._log_bucketing(result)
+        if result is not None and enable_tracking and self._tracker is not None:
+            self._tracker.track_bucketing(
+                visitor_id=self._state.visitor_id,
+                experience_id=result.experience_id,
+                variation_id=result.variation_id,
+            )
         return result
 
     def run_experiences(
@@ -443,6 +463,7 @@ class Context:
         *,
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
+        enable_tracking: bool = True,
     ) -> List[ExperienceResult]:
         """Evaluate all applicable experiences for this visitor.
 
@@ -450,6 +471,15 @@ class Context:
         qualifies for and buckets into; experiences that do not resolve are
         omitted (no ``None`` entries). Evaluation stays local to the snapshot —
         no network I/O.
+
+        Args:
+            attributes: Optional per-call visitor attribute overlay (ephemeral).
+            location_attributes: Optional per-call location attribute overlay
+                (ephemeral).
+            enable_tracking: When ``True`` (the default), each successfully-bucketed
+                result enqueues a bucketing activation event via the tracker
+                (Story 2.5). When ``False``, no bucketing events are enqueued
+                for any resolved experience. Must be passed as a keyword argument.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -468,6 +498,12 @@ class Context:
             if result is not None:
                 results.append(result)
                 self._log_bucketing(result)
+                if enable_tracking and self._tracker is not None:
+                    self._tracker.track_bucketing(
+                        visitor_id=self._state.visitor_id,
+                        experience_id=result.experience_id,
+                        variation_id=result.variation_id,
+                    )
         return results
 
     # --- feature resolution ------------------------------------------------

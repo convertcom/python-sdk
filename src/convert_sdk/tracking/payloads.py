@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from convert_sdk.domain.results import ConversionEvent
+from convert_sdk.domain.results import BucketingEvent, ConversionEvent
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.domain.config_snapshot import ConfigSnapshot
@@ -186,6 +186,61 @@ def _build_visitor_entry(event: ConversionEvent) -> Dict[str, Any]:
         }
     ]
     return visitor
+
+
+def build_bucketing_payload(
+    snapshot: "ConfigSnapshot",
+    event: BucketingEvent,
+    *,
+    data_store: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Assemble the JS-SDK outbound bucketing-event payload for one bucketing activation.
+
+    Wire contract anchored against ``types.gen.ts:2467-2473`` (VisitorTrackingEvents
+    wrapper) and ``types.gen.ts:2486-2497`` (BucketingEvent body) and
+    ``architecture.md §"Bucketing Event Tracking Format"``:
+
+        {eventType: "bucketing", data: {experienceId: str, variationId: str}}
+
+    No ``timestamp``, no extra keys beyond ``eventType`` and ``data``, no ``segments``
+    on the visitor entry (bucketing events carry no segment attribution). The stable
+    envelope fields (``accountId`` / ``projectId`` / ``source`` / ``enrichData``) are
+    computed identically to :func:`build_tracking_payload` so a mixed batch serializes
+    coherently through :meth:`~convert_sdk.tracking.tracker.Tracker._build_batch_payload`.
+
+    Args:
+        snapshot: The immutable config snapshot supplying ``accountId`` /
+            ``projectId``.
+        event: The internal snake_case :class:`~convert_sdk.domain.results.BucketingEvent`
+            to serialize.
+        data_store: The configured DataStore, if any. ``enrichData`` is computed as
+            ``data_store is None`` (F-002 parity with :func:`build_tracking_payload`).
+
+    Returns:
+        A JSON-serializable ``dict`` matching the JS-SDK ``SendTrackingEventsRequestData``
+        envelope with a single bucketing event entry. In-memory only — no batching,
+        queue, or network I/O happens here.
+    """
+    return {
+        "accountId": snapshot.account_id,
+        "projectId": snapshot.project_id,
+        "enrichData": data_store is None,
+        "source": TRACKING_SOURCE,
+        "visitors": [
+            {
+                "visitorId": event.visitor_id,
+                "events": [
+                    {
+                        "eventType": "bucketing",
+                        "data": {
+                            "experienceId": str(event.experience_id),
+                            "variationId": str(event.variation_id),
+                        },
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def build_tracking_payload(
