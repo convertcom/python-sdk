@@ -77,24 +77,38 @@ def snap():
     return load_snapshot(_SNAPSHOT_CONFIG)
 
 
-@pytest.mark.parametrize(
-    "vector",
-    _VECTORS,
-    ids=[f"expId={v['experienceId']}:varId={v['variationId']}" for v in _VECTORS],
-)
-def test_bucketing_event_matches_js_wire_contract(vector, snap):
-    """The Python-serialized bucketing event must match the JS wire contract exactly."""
+def _serialize_event(vector, snap):
+    """Serialize the bucketing event for one parity vector and return its wire dict.
+
+    Shared by every parity test so the event-construction + payload-extraction
+    setup lives in exactly one place (avoids the SonarCloud
+    ``new_duplicated_lines_density`` gate — CPD is token-based, so each test body
+    re-instantiating the builder would count as a duplicated block).
+    """
     BucketingEvent = _import_bucketing_event()
     build_bucketing_payload = _import_build_bucketing_payload()
-
     event = BucketingEvent(
         visitor_id="test-visitor",
         experience_id=vector["experienceId"],
         variation_id=vector["variationId"],
     )
     payload = build_bucketing_payload(snap, event)
+    return payload["visitors"][0]["events"][0]
 
-    actual_event = payload["visitors"][0]["events"][0]
+
+# Single parametrize decorator reused by every vector test (one source of the
+# vector list + id format, applied via the shared name below).
+_over_vectors = pytest.mark.parametrize(
+    "vector",
+    _VECTORS,
+    ids=[f"expId={v['experienceId']}:varId={v['variationId']}" for v in _VECTORS],
+)
+
+
+@_over_vectors
+def test_bucketing_event_matches_js_wire_contract(vector, snap):
+    """The Python-serialized bucketing event must match the JS wire contract exactly."""
+    actual_event = _serialize_event(vector, snap)
     expected_event = vector["expected_event"]
 
     assert actual_event == expected_event, (
@@ -105,23 +119,10 @@ def test_bucketing_event_matches_js_wire_contract(vector, snap):
     )
 
 
-@pytest.mark.parametrize(
-    "vector",
-    _VECTORS,
-    ids=[f"expId={v['experienceId']}:varId={v['variationId']}" for v in _VECTORS],
-)
+@_over_vectors
 def test_bucketing_event_has_no_extra_keys(vector, snap):
     """Negative parity: no timestamp, no extra keys beyond the frozen wire set."""
-    BucketingEvent = _import_bucketing_event()
-    build_bucketing_payload = _import_build_bucketing_payload()
-
-    event = BucketingEvent(
-        visitor_id="test-visitor",
-        experience_id=vector["experienceId"],
-        variation_id=vector["variationId"],
-    )
-    payload = build_bucketing_payload(snap, event)
-    actual_event = payload["visitors"][0]["events"][0]
+    actual_event = _serialize_event(vector, snap)
 
     assert set(actual_event.keys()) == {"eventType", "data"}
     assert set(actual_event["data"].keys()) == {"experienceId", "variationId"}
@@ -129,23 +130,10 @@ def test_bucketing_event_has_no_extra_keys(vector, snap):
     assert "timestamp" not in actual_event["data"]
 
 
-@pytest.mark.parametrize(
-    "vector",
-    _VECTORS,
-    ids=[f"expId={v['experienceId']}:varId={v['variationId']}" for v in _VECTORS],
-)
+@_over_vectors
 def test_bucketing_event_ids_are_string_typed(vector, snap):
     """experienceId and variationId on the wire must be str (JS .toString() parity)."""
-    BucketingEvent = _import_bucketing_event()
-    build_bucketing_payload = _import_build_bucketing_payload()
-
-    event = BucketingEvent(
-        visitor_id="test-visitor",
-        experience_id=vector["experienceId"],
-        variation_id=vector["variationId"],
-    )
-    payload = build_bucketing_payload(snap, event)
-    data = payload["visitors"][0]["events"][0]["data"]
+    data = _serialize_event(vector, snap)["data"]
 
     assert isinstance(data["experienceId"], str)
     assert isinstance(data["variationId"], str)
