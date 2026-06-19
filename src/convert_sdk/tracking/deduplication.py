@@ -83,6 +83,48 @@ class DedupDecision:
     already_tracked: bool
 
 
+def bucketing_marker_key(visitor_id: str, experience_id: str) -> str:
+    """Build the DataStore key for the ``(visitor_id, experience_id)`` bucketing marker.
+
+    Uses a collision-safe namespaced key
+    ``f"bucketing:{json.dumps([visitor_id, experience_id])}"``. JSON serialization of a
+    two-element list guarantees no collision regardless of separator characters in the
+    values — e.g. ``("a:b", "c")`` → ``'bucketing:["a:b", "c"]'`` and
+    ``("a", "b:c")`` → ``'bucketing:["a", "b:c"]'`` are guaranteed distinct, where a
+    naive ``f"{visitor_id}:{experience_id}"`` composite would collide. Parallel to
+    :func:`goal_marker_key` but uses the ``bucketing:`` prefix to keep concerns separate.
+    """
+    return f"bucketing:{json.dumps([visitor_id, experience_id])}"
+
+
+def evaluate_bucketing_dedup(
+    store: DataStore,
+    *,
+    visitor_id: str,
+    experience_id: str,
+) -> bool:
+    """Check and persist a bucketing deduplication marker for ``(visitor_id, experience_id)``.
+
+    Returns ``True`` (should enqueue) when the marker is absent (first time for this
+    visitor+experience pair) and persists the marker via ``store.set(key, True)``.
+    Returns ``False`` (suppress) when the marker is already present.
+
+    Bucketing dedup has no ``force_multiple`` / ``goalData`` analog — it is a plain
+    "first time?" check scoped to ``(visitor_id, experience_id)``. This satisfies
+    Story 2.5 AC#3: client-side dedup ensures each visitor-experience pair produces
+    at most one bucketing event per DataStore scope. Note that the JS SDK enqueues
+    bucketing events unconditionally and relies on server-side ``enrichData`` — the
+    Python SDK honors the story contract with an explicit client-side dedup marker
+    instead, consistent with the Python SDK's ``DataStore``-backed dedup approach
+    for conversions.
+    """
+    key = bucketing_marker_key(visitor_id, experience_id)
+    if store.has(key):
+        return False
+    store.set(key, True)
+    return True
+
+
 def evaluate_dedup(
     store: DataStore,
     *,

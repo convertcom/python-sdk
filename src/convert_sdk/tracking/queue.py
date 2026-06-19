@@ -30,9 +30,15 @@ from __future__ import annotations
 import enum
 import threading
 from dataclasses import dataclass, field
-from typing import Any, List, Mapping, Optional
+from typing import Any, List, Mapping, Optional, Union
 
-from convert_sdk.domain.results import ConversionEvent
+from convert_sdk.domain.results import BucketingEvent, ConversionEvent
+
+# Union type for all events the queue can hold (Story 2.5). Both ConversionEvent
+# and BucketingEvent carry a ``visitor_id`` field so per-visitor grouping works
+# unchanged. The queue holds snake_case domain objects only — wire serialization
+# is dispatched per-type at flush time in ``tracking/tracker.py``.
+TrackedEvent = Union[ConversionEvent, BucketingEvent]
 
 
 class ReleaseReason(str, enum.Enum):
@@ -64,7 +70,7 @@ class VisitorQueueItem:
     """
 
     visitor_id: str
-    events: List[ConversionEvent] = field(default_factory=list)
+    events: List[TrackedEvent] = field(default_factory=list)
     segments: Optional[Mapping[str, Any]] = None
 
 
@@ -125,11 +131,11 @@ class TrackingQueue:
 
     def enqueue(
         self,
-        event: ConversionEvent,
+        event: TrackedEvent,
         *,
         segments: Optional[Mapping[str, Any]] = None,
     ) -> bool:
-        """Append a conversion event for its visitor; lightweight and synchronous.
+        """Append a tracked event (conversion or bucketing) for its visitor; lightweight and sync.
 
         Groups the event under its ``visitor_id`` and records the visitor's
         active ``segments`` (latest write wins). Performs no network I/O and no
@@ -137,6 +143,11 @@ class TrackingQueue:
         total event count to the configured ``batch_size`` — the signal that the
         caller should release the queue via the shared release path with
         :attr:`ReleaseReason.SIZE`. Returns ``False`` otherwise.
+
+        Both :class:`~convert_sdk.domain.results.ConversionEvent` and
+        :class:`~convert_sdk.domain.results.BucketingEvent` are accepted; they
+        coexist in the same per-visitor batch and are dispatched per-type at flush
+        time in :meth:`~convert_sdk.tracking.tracker.Tracker._build_batch_payload`.
         """
         with self._lock:
             item = self._items.get(event.visitor_id)

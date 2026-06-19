@@ -39,12 +39,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
 from convert_sdk.domain.results import (
+    BucketingEvent,
     ConversionEvent,
     ConversionResult,
     ConversionStatus,
 )
 from convert_sdk.errors import TrackingDeliveryError
 from convert_sdk.events import (
+    BucketingEventPayload,
     ConversionEventPayload,
     LifecycleEvent,
     QueueReleasedPayload,
@@ -55,8 +57,12 @@ from convert_sdk.logging import (
 )
 from convert_sdk.ports.storage import DataStore
 from convert_sdk.tracking.conversions import create_conversion
-from convert_sdk.tracking.deduplication import evaluate_dedup
-from convert_sdk.tracking.payloads import build_tracking_payload, event_has_goal_data
+from convert_sdk.tracking.deduplication import evaluate_bucketing_dedup, evaluate_dedup
+from convert_sdk.tracking.payloads import (
+    build_bucketing_payload,
+    build_tracking_payload,
+    event_has_goal_data,
+)
 from convert_sdk.tracking.queue import ReleaseReason, TrackingQueue, VisitorQueueItem
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -237,6 +243,69 @@ class Tracker:
             ),
         )
 
+    # --- bucketing activation tracking (Story 2.5) -------------------------
+
+    def track_bucketing(
+        self,
+        *,
+        visitor_id: str,
+        experience_id: str,
+        variation_id: str,
+        segments: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Dedup, enqueue, and emit a bucketing activation event (Story 2.5).
+
+        Called after a visitor is successfully bucketed into an experience variation
+        (from :meth:`~convert_sdk.context.Context.run_experience` /
+        :meth:`~convert_sdk.context.Context.run_experiences` when
+        ``enable_tracking=True``).
+
+        Flow:
+        1. Evaluate bucketing deduplication via the DataStore boundary: if the
+           ``(visitor_id, experience_id)`` pair was already tracked, return immediately
+           (no enqueue, no emit — AC#3).
+        2. Build a :class:`~convert_sdk.domain.results.BucketingEvent` and enqueue it.
+           If the batch size is reached, release via the shared release path.
+        3. Emit ``LifecycleEvent.BUCKETING`` with a
+           :class:`~convert_sdk.events.BucketingEventPayload` (AC#5). Handler
+           exceptions are swallowed by the
+           :class:`~convert_sdk.adapters.events.in_process.InProcessEventBus`
+           — no guard needed here.
+        """
+        should_enqueue = evaluate_bucketing_dedup(
+            self._store, visitor_id=visitor_id, experience_id=experience_id
+        )
+        if not should_enqueue:
+            return
+
+        event = BucketingEvent(
+            visitor_id=visitor_id,
+            experience_id=experience_id,
+            variation_id=variation_id,
+        )
+        reached_batch = self._queue.enqueue(event, segments=segments)
+        self._emit_bucketing(event)
+        if reached_batch:
+            self._release(ReleaseReason.SIZE)
+
+    def _emit_bucketing(self, event: BucketingEvent) -> None:
+        """Emit ``LifecycleEvent.BUCKETING`` for a bucketed enqueue (Story 2.5).
+
+        Mirrors :meth:`_emit_conversion`: guarded no-op when no event bus is wired.
+        The bus swallows handler exceptions so the tracking flow is never broken by a
+        bad subscriber.
+        """
+        if self._event_bus is None:
+            return
+        self._event_bus.emit(
+            LifecycleEvent.BUCKETING,
+            BucketingEventPayload(
+                visitor_id=event.visitor_id,
+                experience_id=event.experience_id,
+                variation_id=event.variation_id,
+            ),
+        )
+
     # --- flush / release ---------------------------------------------------
 
     def flush(self) -> None:
@@ -379,23 +448,30 @@ class Tracker:
     def _build_batch_payload(self, items: List[VisitorQueueItem]) -> dict[str, Any]:
         """Serialize all drained per-visitor items into ONE batch envelope.
 
-        Reuses the Story 2.2 ``build_tracking_payload`` serializer (single
-        serialization path, NFR21 parity) for each event, then **merges events
-        belonging to the same visitor into a single ``visitors[]`` entry** so the
-        batch matches the JS ``VisitorsQueue`` grouping (``api-manager.ts``):
-        one entry per visitor carrying all of that visitor's events. The stable
-        envelope fields (``accountId`` / ``projectId`` / ``source`` /
-        ``enrichData``) come from the serializer so they are computed exactly
-        once and never re-derived in the flush path (no second serializer).
+        Dispatches per event type — :class:`~convert_sdk.domain.results.ConversionEvent`
+        uses :func:`~convert_sdk.tracking.payloads.build_tracking_payload`; a
+        :class:`~convert_sdk.domain.results.BucketingEvent` uses
+        :func:`~convert_sdk.tracking.payloads.build_bucketing_payload`. Then merges
+        events belonging to the same visitor into a single ``visitors[]`` entry so the
+        batch matches the JS ``VisitorsQueue`` grouping (``api-manager.ts``): one entry
+        per visitor carrying all of that visitor's events. A bucketing + conversion event
+        for the same visitor land in the same ``events`` array (AC#1). The stable
+        envelope fields (``accountId`` / ``projectId`` / ``source`` / ``enrichData``)
+        come from the first serialized event so they are computed exactly once.
         """
         # visitor_id -> merged visitors[] entry (preserving insertion order).
         merged: "dict[str, dict[str, Any]]" = {}
         envelope: Optional[dict[str, Any]] = None
         for item in items:
             for event in item.events:
-                single = build_tracking_payload(
-                    self._snapshot, event, data_store=self._config.data_store
-                )
+                if isinstance(event, BucketingEvent):
+                    single = build_bucketing_payload(
+                        self._snapshot, event, data_store=self._config.data_store
+                    )
+                else:
+                    single = build_tracking_payload(
+                        self._snapshot, event, data_store=self._config.data_store
+                    )
                 if envelope is None:
                     envelope = single
                 for visitor in single["visitors"]:

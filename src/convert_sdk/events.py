@@ -10,9 +10,10 @@ these types; this module never reaches back into them.
 Enum identifiers are frozen by the PRD (``prd.md#API-Surface``) and aligned with
 the JS ``SystemEvents`` parity subset:
 
-* ``READY`` / ``CONFIG_UPDATED`` / ``BUCKETING`` are defined for completeness and
-  JS parity but are emitted by the initialization/config and evaluation layers —
-  Story 2.4 does NOT emit them (Critical Warning #12).
+* ``READY`` / ``CONFIG_UPDATED`` are defined for completeness and JS parity but
+  are emitted by the initialization/config layers.
+* ``BUCKETING`` is emitted from the tracking enqueue path (Story 2.5) after a
+  visitor is bucketed into a variation and the bucketing event is enqueued.
 * ``CONVERSION`` is emitted from the tracking enqueue path on a tracked
   (non-suppressed) conversion.
 * ``API_QUEUE_RELEASED`` is emitted from the single shared release path on every
@@ -72,6 +73,21 @@ class ConversionEventPayload:
     visitor_id: str
     goal_id: str
     goal_key: str
+
+
+@dataclass(frozen=True)
+class BucketingEventPayload:
+    """Domain-relevant context for a ``BUCKETING`` lifecycle event (Story 2.5).
+
+    Carries ONLY internal snake_case domain identity fields — never raw visitor
+    attributes, the wire payload, or any transport object (NFR6). Built directly
+    from the in-process bucketing event, not from the wire serializer, so emission
+    stays off the serialization path. Parallel to :class:`ConversionEventPayload`.
+    """
+
+    visitor_id: str
+    experience_id: str
+    variation_id: str
 
 
 @dataclass(frozen=True)
