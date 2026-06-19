@@ -1,0 +1,32 @@
+{
+  "generated_from": {
+    "reference": "Convert JavaScript SDK wire contract — VisitorTrackingEvents / BucketingEvent",
+    "js_types_file": "../javascript-sdk/packages/types/src/config/types.gen.ts:2467-2497",
+    "derivation": "Wire shape is authoritative per architecture.md §'Bucketing Event Tracking Format': {eventType: 'bucketing', data: {experienceId, variationId}}. No timestamp, no extra keys. experienceId and variationId are string-typed (JS .toString()).",
+    "method": "hand-authored to match the frozen wire contract — not derived from a running oracle (the wire shape is a simple, fully-specified constant, not a hash)"
+  },
+  "vectors": [
+    {
+      "experienceId": "1001",
+      "variationId": "2001",
+      "expected_event": {
+        "eventType": "bucketing",
+        "data": {
+          "experienceId": "1001",
+          "variationId": "2001"
+        }
+      }
+    },
+    {
+      "experienceId": "e2",
+      "variationId": "v99",
+      "expected_event": {
+        "eventType": "bucketing",
+        "data": {
+          "experienceId": "e2",
+          "variationId": "v99"
+        }
+      }
+    }
+  ]
+}
