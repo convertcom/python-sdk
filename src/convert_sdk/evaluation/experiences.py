@@ -25,8 +25,10 @@ from typing import Any, Mapping, Optional, Sequence
 
 from convert_sdk.domain.results import ExperienceResult
 from convert_sdk.evaluation.bucketing import (
+    build_bucket_ranges,
     get_bucket_value_for_visitor,
     select_bucket,
+    select_bucket_anchored,
 )
 from convert_sdk.evaluation.rules import qualifies
 
@@ -76,6 +78,72 @@ def _build_buckets(experience: Mapping[str, Any]) -> "dict[str, float]":
     return buckets
 
 
+def _is_anchored_layout(experience: Mapping[str, Any]) -> bool:
+    """Return ``True`` iff ``experience`` gates the anchored layout (bucketing
+    contract v12; qs-01-anchored-bucketing-layout.md).
+
+    Mirrors the JS reference's ``Number(experience.version) > 11``: numeric
+    strings coerce the same way JS ``Number()`` does (``"12"`` -> anchored),
+    while a missing, ``NaN``, or non-numeric ``version`` routes to the
+    existing packed layout — every currently-served production experience is
+    stamped ``version: 11`` and must keep resolving through the packed walk
+    (the inert-on-ship guarantee). Uses the same float-coercion shape as
+    :func:`_has_traffic` rather than an ``isinstance`` check, so numeric
+    strings are honored exactly like the JS ``Number()`` coercion.
+    """
+    version = experience.get("version")
+    if version is None:
+        return False
+    try:
+        numeric = float(version)
+    except (TypeError, ValueError):
+        return False
+    if math.isnan(numeric):
+        return False
+    return numeric > 11
+
+
+def _build_variation_allocations(
+    experience: Mapping[str, Any],
+) -> "list[dict[str, Any]]":
+    """Build the ordered anchored-layout allocation list for ``experience``.
+
+    Unlike :func:`_build_buckets` (the packed layout's builder), inactive and
+    zero-allocation variations are **not** dropped here — the anchored
+    algorithm needs every entry's allocation weight (active or not) to walk
+    the cumulative anchors, so stopping one arm never moves its neighbours'
+    anchors (see :func:`convert_sdk.evaluation.bucketing.build_bucket_ranges`).
+    Only entries missing an ``id`` are skipped. Mirrors the JS reference's
+    ``_buildVariationAllocations``
+    (``../javascript-sdk`` branch ``feat/anchored-bucketing-layout``,
+    ``packages/data/src/data-manager.ts``): ``allocation`` defaults to
+    ``100.0`` when the declared ``traffic_allocation`` is absent, non-numeric,
+    or ``NaN`` (never re-interpreting an explicit ``0`` as ``100``), and
+    ``active`` reuses the existing :func:`_is_running` / :func:`_has_traffic`
+    helpers, which already match the JS ``status``/``ta`` semantics.
+    """
+    allocations: "list[dict[str, Any]]" = []
+    for variation in experience.get("variations", []) or []:
+        variation_id = variation.get("id")
+        if not variation_id:
+            continue
+        raw_allocation = variation.get("traffic_allocation")
+        try:
+            percentage = float(raw_allocation)
+            if math.isnan(percentage):
+                percentage = 100.0
+        except (TypeError, ValueError):
+            percentage = 100.0
+        allocations.append(
+            {
+                "id": str(variation_id),
+                "allocation": percentage,
+                "active": _is_running(variation) and _has_traffic(variation),
+            }
+        )
+    return allocations
+
+
 def select_experience(
     experience_key: str,
     snapshot: Any,
@@ -109,14 +177,20 @@ def select_experience(
     if not experience_id:
         return None
 
-    buckets = _build_buckets(experience)
-    if not buckets:
-        return None
-
     bucket_value = get_bucket_value_for_visitor(
         visitor_id, experience_id=str(experience_id)
     )
-    variation_id = select_bucket(buckets, bucket_value)
+
+    if _is_anchored_layout(experience):
+        allocations = _build_variation_allocations(experience)
+        ranges = build_bucket_ranges(allocations)
+        variation_id = select_bucket_anchored(ranges, bucket_value)
+    else:
+        buckets = _build_buckets(experience)
+        if not buckets:
+            return None
+        variation_id = select_bucket(buckets, bucket_value)
+
     if variation_id is None:
         return None
 

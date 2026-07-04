@@ -80,7 +80,14 @@ def _thirds_experience(
         (13, True),
         ("12", True),  # numeric-string coercion parity: Number("12") > 11
         (11, False),
-        (11.9, False),
+        # GREEN-phase fix (genuine RED-phase test bug, flagged not silently
+        # patched): the gate is a literal `Number(experience.version) > 11`
+        # with no flooring (../javascript-sdk data-manager.ts:695, and no
+        # fractional-version case exists in that file's own gate test suite
+        # data-manager-anchored-gate.tests.ts to contradict it). 11.9 > 11 is
+        # mathematically True, so this must route anchored, not packed -- the
+        # spec text's "version <= 11 ... -> packed" also excludes 11.9.
+        (11.9, True),
         ("11", False),
         ("abc", False),  # Number("abc") is NaN -> NaN > 11 is False
         (float("nan"), False),
