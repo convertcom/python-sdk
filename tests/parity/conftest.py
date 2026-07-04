@@ -47,6 +47,18 @@ def feature_vectors() -> list:
 
 
 @pytest.fixture(scope="session")
+def anchored_bucketing_vectors() -> list:
+    """Golden anchored-vs-packed bucketing vectors (qs-01, bucketing contract v12).
+
+    Unlike the other parity fixtures above, ``anchored_bucketing_vectors.json``'s
+    root is a BARE JSON LIST (no ``{"vectors": [...]}`` wrapper) -- see
+    qs-01-anchored-bucketing-layout.md "Golden-vector fixture" and the PY-1
+    commit that imported this fixture.
+    """
+    return _load("anchored_bucketing_vectors.json")
+
+
+@pytest.fixture(scope="session")
 def state_vectors() -> list:
     """Golden Epic-3 state / entity-lookup + segment vectors from the JS reference.
 
