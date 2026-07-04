@@ -66,7 +66,7 @@ the deterministic algorithm that cross-SDK parity depends on.
 
 The parity suite verifies byte-exact agreement between the Python SDK and the
 JavaScript SDK reference. It is release-blocking: a red parity test blocks the
-release workflow. It covers four domains:
+release workflow. It covers these surfaces:
 
 | Fixture file | What it covers |
 |---|---|
@@ -74,6 +74,11 @@ release workflow. It covers four domains:
 | `rule_vectors.json` | `OR/AND/OR_WHEN` rule-tree evaluation results |
 | `feature_vectors.json` | Feature resolution: status and cast variable values |
 | `state_vectors.json` | Entity lookup and segment evaluation |
+| `anchored_bucketing_vectors.json` | Anchored vs packed bucketing layout (contract v12): `experience.version > 11` selects the anchored ranges, `version <= 11` stays packed |
+
+`anchored_bucketing_vectors.json` is a **bare JSON list** imported verbatim from
+the shared cross-SDK golden set (59 vectors, versions {11, 12}); unlike the four
+fixtures above it is **not** (re)written by `scripts/generate_parity_fixtures.py`.
 
 Fixtures are checked-in JSON. CI never requires a Node.js runtime at test time.
 The test infrastructure parametrizes over the vectors and feeds them through the
