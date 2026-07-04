@@ -7,13 +7,18 @@ Story 1.4 ships the bucketing vectors it needs and the loader they consume.
 
 import json
 from pathlib import Path
+from typing import Any, Union
 
 import pytest
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def _load(name: str) -> dict:
+def _load(name: str) -> Union[dict[str, Any], list[Any]]:
+    """Load a fixture file. Most fixtures wrap their vectors in a top-level
+    ``{"vectors": [...]}`` dict; ``anchored_bucketing_vectors.json`` is a bare
+    JSON list, so the return type covers both shapes.
+    """
     with (_FIXTURES_DIR / name).open(encoding="utf-8") as handle:
         return json.load(handle)
 

@@ -3,11 +3,10 @@
 precedence, and API-shape acceptance criteria (qs-01-anchored-bucketing-layout.md,
 bucketing contract v12).
 
-TDD RED (phase 1): ``experiences._is_anchored_layout`` and
-``experiences._build_variation_allocations`` do not exist yet -- calling them
-raises ``AttributeError`` (they are module-level functions on an already
-importable module, mirroring the direct-helper convention in
-``tests/test_evaluation_internals.py``) until the GREEN phase adds them.
+``experiences._is_anchored_layout`` and
+``experiences._build_variation_allocations`` are module-level functions on
+``convert_sdk.evaluation.experiences``, exercised directly here mirroring the
+direct-helper convention in ``tests/test_evaluation_internals.py``.
 
 Grounded in the JS reference (``../javascript-sdk`` branch
 ``feat/anchored-bucketing-layout``, ``packages/data/src/data-manager.ts``)::

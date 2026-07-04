@@ -1,14 +1,11 @@
 """Cross-SDK byte-exact parity tests for the anchored bucketing layout
 (qs-01-anchored-bucketing-layout.md, bucketing contract v12).
 
-RED (TDD phase 1): the ``experience.version > 11`` gate and the anchored
-selector do not exist yet in ``convert_sdk.evaluation.experiences`` /
-``convert_sdk.evaluation.bucketing`` -- every ``version: 12`` vector below is
-expected to FAIL against today's packed-only implementation (it either resolves
-to the wrong variation or misses a bucket the anchored layout would have hit).
-Once the GREEN phase wires the gate, the full fixture (59/59 vectors, versions
-``{11, 12}``) must pass -- this is AC7. The ``version: 11`` vectors already pass
-today and must stay green through the GREEN phase (AC6 packed regression lock).
+The ``experience.version > 11`` gate and the anchored selector live in
+``convert_sdk.evaluation.experiences`` / ``convert_sdk.evaluation.bucketing``.
+The full fixture (59/59 vectors, versions ``{11, 12}``) must pass -- this is
+AC7. The ``version: 11`` vectors exercise the untouched packed path and must
+stay green (AC6 packed regression lock).
 
 Fixture shape differs from the sibling ``bucketing_vectors.json``: the root of
 ``fixtures/anchored_bucketing_vectors.json`` is a BARE JSON LIST (no
@@ -75,11 +72,11 @@ def test_anchored_bucketing_matches_js_reference(vector, anchored_bucketing_vect
     ``version <= 11`` vectors exercise the untouched packed path (AC6
     regression lock); ``version > 11`` vectors exercise the anchored path this
     fixture is the contract for (AC7). AC1's gate is exercised implicitly and
-    exhaustively: 18 visitor/experience pairs in this fixture are asserted
+    exhaustively: 8 visitor/experience pairs in this fixture are asserted
     against BOTH a ``version: 11`` and a ``version: 12`` variations config with
     the IDENTICAL (and therefore identical hash-derived) bucket value, expecting
-    DIFFERENT outcomes -- which can only pass once ``version`` actually selects
-    the layout.
+    DIFFERENT outcomes -- which only passes because ``version`` actually
+    selects the layout.
     """
     assert isinstance(anchored_bucketing_vectors, list) and anchored_bucketing_vectors
 
@@ -97,12 +94,10 @@ def test_anchored_bucketing_matches_js_reference(vector, anchored_bucketing_vect
 
 
 def test_packed_only_v11_subset_is_already_green_today():
-    """AC6 regression lock, isolated from the anchored failures above: the
-    ``version: 11`` subset must pass even BEFORE the anchored gate exists (it
-    already does, since ``select_experience`` ignores ``version`` today) --
-    this test pins that baseline down independently so a future regression in
-    the packed path is caught even if every anchored-path assertion above is
-    (expectedly, in this RED phase) failing for unrelated reasons.
+    """AC6 regression lock, isolated from the anchored assertions above: the
+    ``version: 11`` subset exercises the packed path independently of the
+    anchored path, so a future regression in the packed path is caught even
+    if an anchored-path assertion above fails for unrelated reasons.
     """
     v11_vectors = [v for v in _VECTORS if v["version"] == 11]
     assert v11_vectors, "fixture must contain v11 (packed) vectors"

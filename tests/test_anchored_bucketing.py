@@ -1,11 +1,10 @@
 """Unit tests for the anchored bucketing layout's pure selection primitives
 (qs-01-anchored-bucketing-layout.md, bucketing contract v12).
 
-TDD RED (phase 1): ``build_bucket_ranges`` / ``select_bucket_anchored`` do not
-exist yet in ``convert_sdk.evaluation.bucketing`` -- this import is expected to
-raise ``ImportError`` at collection time until the GREEN phase adds them. This
-pins down the exact contract the GREEN phase must satisfy, mirroring the JS
-reference (``../javascript-sdk`` branch ``feat/anchored-bucketing-layout``,
+``build_bucket_ranges`` / ``select_bucket_anchored`` live in
+``convert_sdk.evaluation.bucketing`` and implement the anchored-layout
+contract mirrored from the JS reference (``../javascript-sdk`` branch
+``feat/anchored-bucketing-layout``,
 ``packages/bucketing/src/bucketing-manager.ts`` ``getBucketRanges`` /
 ``selectBucketAnchored``)::
 
