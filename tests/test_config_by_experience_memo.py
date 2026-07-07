@@ -276,6 +276,70 @@ def test_second_resolution_after_ttl_expiry_triggers_second_fetch(monkeypatch):
     assert len(route.calls) == 2
 
 
+# --- unbounded growth: expired entries are swept on write (review R1) -------
+
+
+@respx.mock
+def test_write_sweeps_expired_entries_but_keeps_ttl_boundary_intact(monkeypatch):
+    """Code-review finding R1 (Ruby sibling parity, ruby-sdk#41): overwriting a
+    same-key entry must never be the ONLY eviction path, or the memo grows
+    unbounded with every distinct ``experience_id`` a preview link ever named
+    over the process lifetime. Populate three distinct keys, advance the clock
+    past the TTL, then trigger a write for exactly one of them -- ALL expired
+    entries (not just the re-fetched key) must be swept from the dict, while
+    AC8 (one fetch per key within the TTL) still holds for a fresh key created
+    by the same sweeping write.
+    """
+    clock = {"t": FIXED_NOW}
+    monkeypatch.setattr(httpx_transport_module, "_now", lambda: clock["t"])
+    route = respx.get(url__regex=_ROUTE_REGEX).mock(
+        return_value=httpx.Response(200, json=CONFIG_BODY)
+    )
+
+    transport = HttpxTransport(TransportConfig())
+    cfg = SDKConfig(sdk_key="sdkkey123")
+
+    transport.fetch_config_by_experience(cfg, "exp-sweep-a")
+    transport.fetch_config_by_experience(cfg, "exp-sweep-b")
+    transport.fetch_config_by_experience(cfg, "exp-sweep-c")
+    assert len(httpx_transport_module._CONFIG_BY_EXPERIENCE_CACHE) == 3
+
+    clock["t"] = FIXED_NOW + TTL_SECONDS + 1  # 61s later -- all three expired
+    transport.fetch_config_by_experience(cfg, "exp-sweep-a")  # triggers the sweep
+    transport.close()
+
+    cache = httpx_transport_module._CONFIG_BY_EXPERIENCE_CACHE
+    assert len(cache) == 1
+    assert set(cache) == {"sdkkey123:exp-sweep-a"}
+    assert len(route.calls) == 4  # 3 initial + 1 refetch of the expired "a"
+
+
+@respx.mock
+def test_write_sweep_does_not_disturb_still_fresh_entries_within_ttl(monkeypatch):
+    """AC8 companion to the sweep test above: a write for a NEW key while an
+    UNRELATED key is still within its TTL window must not evict the fresh
+    entry, and resolving that fresh key again must still cost exactly one
+    fetch (no accidental over-eviction)."""
+    clock = {"t": FIXED_NOW}
+    monkeypatch.setattr(httpx_transport_module, "_now", lambda: clock["t"])
+    route = respx.get(url__regex=_ROUTE_REGEX).mock(
+        return_value=httpx.Response(200, json=CONFIG_BODY)
+    )
+
+    transport = HttpxTransport(TransportConfig())
+    cfg = SDKConfig(sdk_key="sdkkey123")
+
+    transport.fetch_config_by_experience(cfg, "exp-sweep-fresh")
+    clock["t"] = FIXED_NOW + (TTL_SECONDS - 1)  # still within the window
+    transport.fetch_config_by_experience(cfg, "exp-sweep-new")
+    transport.fetch_config_by_experience(cfg, "exp-sweep-fresh")  # still memoized
+    transport.close()
+
+    assert len(route.calls) == 2
+    cache = httpx_transport_module._CONFIG_BY_EXPERIENCE_CACHE
+    assert set(cache) == {"sdkkey123:exp-sweep-fresh", "sdkkey123:exp-sweep-new"}
+
+
 # --- failed fetch is never memoized -> next call retries (JS parity) --------
 
 

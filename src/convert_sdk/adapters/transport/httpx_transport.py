@@ -222,6 +222,18 @@ class HttpxTransport:
 
         Never touches the DataStore -- this cache is purely in-memory and
         process-wide, independent of any per-visitor persistence boundary.
+
+        On a real (non-memoized) fetch, expired entries across ALL keys are
+        swept from the memo before the new entry is stored (code-review
+        finding R1, Ruby sibling parity: ruby-sdk#41). Without this sweep the
+        dict would only ever OVERWRITE a same-key entry and would otherwise
+        grow unbounded with the number of distinct ``(sdk_key, experience_id)``
+        pairs previewed over the process lifetime -- experience_ids originate
+        from external, attacker-influenceable preview link params. The sweep
+        runs inside the SAME critical section as the check+fetch+store
+        sequence, so it adds no new lock and cannot introduce a double-fetch
+        race (AC8 is unaffected: it only ever removes entries already past
+        their TTL, never a fresh one).
         """
         cache_key = f"{config.sdk_key}:{experience_id}"
         with _CONFIG_BY_EXPERIENCE_LOCK:
@@ -233,7 +245,15 @@ class HttpxTransport:
 
             route = self._build_experience_route(config, experience_id)
             body = self._get_config_json(route)
-            _CONFIG_BY_EXPERIENCE_CACHE[cache_key] = (body, _now())
+            now = _now()
+            expired_keys = [
+                key
+                for key, (_, fetched_at) in _CONFIG_BY_EXPERIENCE_CACHE.items()
+                if now - fetched_at >= _CONFIG_BY_EXPERIENCE_TTL_SECONDS
+            ]
+            for key in expired_keys:
+                del _CONFIG_BY_EXPERIENCE_CACHE[key]
+            _CONFIG_BY_EXPERIENCE_CACHE[cache_key] = (body, now)
             return body
 
     # --- tracking delivery (metrics host) ------------------------------------
