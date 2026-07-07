@@ -47,15 +47,19 @@ def _find_experience_in_body(
     ``config_loader/normalizer.py``), so a direct field-name match is safe
     without running the body through the full validate/normalize pipeline.
     Returns ``None`` on any miss (absent ``experiences`` list, no matching id) —
-    never raises.
+    never raises. An experience with a missing or ``null`` ``id`` never
+    matches, even when ``experience_id`` is the literal string ``"None"`` —
+    guarding the ``str(None) == "None"`` footgun a bare string comparison
+    would otherwise fall into.
     """
     experiences = body.get("experiences")
     if not isinstance(experiences, list):
         return None
     for experience in experiences:
-        if isinstance(experience, Mapping) and str(experience.get("id")) == str(
-            experience_id
-        ):
+        if not isinstance(experience, Mapping):
+            continue
+        exp_id = experience.get("id")
+        if exp_id is not None and str(exp_id) == str(experience_id):
             return experience
     return None
 

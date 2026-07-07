@@ -53,7 +53,7 @@ from convert_sdk.adapters.transport import httpx_transport as httpx_transport_mo
 from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.config_loader import load_snapshot
-from convert_sdk.core import Core
+from convert_sdk.core import Core, _find_experience_in_body
 from convert_sdk.domain.results import ExperienceResult
 from convert_sdk.evaluation.experiences import select_experience
 
@@ -158,6 +158,66 @@ def _remote_core(*, transport: HttpxTransport) -> Core:
         ),
         transport=transport,
     ).initialize()
+
+
+# --- _find_experience_in_body pure helper (defensive hardening, code review) -
+#
+# Regression lock for a footgun found in review: ``str(experience.get("id"))
+# == str(experience_id)`` would coerce a MISSING or ``null`` id to the string
+# "None", falsely matching a lookup for the literal experience_id "None". The
+# helper backs ``Core._resolve_preview_experience`` (this file's PY-5 fetch-
+# through path), so it is exercised here at the unit level -- no Core/HTTP
+# setup needed since it is a pure function of a raw config body.
+
+
+@pytest.mark.parametrize(
+    ("body", "experience_id", "expect_match"),
+    [
+        pytest.param(
+            {"experiences": [{"key": "no-id-exp"}]},
+            "None",
+            False,
+            id="missing_id_key_never_matches_literal_none_lookup",
+        ),
+        pytest.param(
+            {"experiences": [{"id": None, "key": "null-id-exp"}]},
+            "None",
+            False,
+            id="explicit_null_id_never_matches_literal_none_lookup",
+        ),
+        pytest.param(
+            {"experiences": [{"id": "123", "key": "numeric-id-exp"}]},
+            "123",
+            True,
+            id="normal_numeric_string_id_still_matches",
+        ),
+        pytest.param(
+            {"key": "no-experiences-list"},
+            "123",
+            False,
+            id="body_missing_experiences_list",
+        ),
+        pytest.param(
+            {"experiences": "not-a-list"},
+            "123",
+            False,
+            id="experiences_field_not_a_list",
+        ),
+    ],
+)
+def test_find_experience_in_body_id_matching(
+    body: Dict[str, Any], experience_id: str, expect_match: bool
+) -> None:
+    """``_find_experience_in_body`` never falsely matches an id-less
+    experience against the literal lookup string ``"None"``, while a normal
+    numeric-string id still matches -- guarding the helper's own docstring
+    contract ('Returns None on any miss ... never raises.')."""
+    result = _find_experience_in_body(body, experience_id)
+    if expect_match:
+        assert result is not None
+        assert result["id"] == experience_id
+    else:
+        assert result is None
 
 
 # --- AC4: full bypass -- status, environment, non-running, zero-traffic -----
