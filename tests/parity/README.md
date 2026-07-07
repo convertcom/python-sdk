@@ -21,11 +21,13 @@ tests/parity/
 │   ├── bucketing_vectors.json        # MurmurHash3-32 hash vectors (seed 9999)
 │   ├── rule_vectors.json             # RuleManager / Comparisons vectors
 │   ├── feature_vectors.json          # feature-resolution vectors
-│   └── state_vectors.json            # entity-lookup + custom-segment vectors
+│   ├── state_vectors.json            # entity-lookup + custom-segment vectors
+│   └── anchored_bucketing_vectors.json  # anchored-vs-packed layout vectors (contract v12; BARE JSON list, imported verbatim — NOT generator-written)
 ├── test_js_bucketing_parity.py       # bucketing parity (Story 1.4 baseline)
 ├── test_js_rule_parity.py            # rule-evaluation parity (Story 1.4 surface)
 ├── test_js_feature_parity.py         # feature-resolution parity (Story 1.5/1.6 surface)
-└── test_js_state_parity.py           # state/entity-lookup + segment parity (Story 3.3/3.4)
+├── test_js_state_parity.py           # state/entity-lookup + segment parity (Story 3.3/3.4)
+└── test_js_anchored_bucketing_parity.py  # anchored bucketing layout parity (qs-01; versions {11,12})
 ```
 
 Fixtures live ONLY under `fixtures/` as external checked-in JSON. They are NEVER
@@ -128,6 +130,14 @@ editing a fixture.
 
 ## Scope and related parity work
 
+- **Anchored bucketing parity** (`anchored_bucketing_vectors.json` /
+  `test_js_anchored_bucketing_parity.py`, bucketing contract v12) is a cross-SDK
+  golden set **imported verbatim** (59 vectors, versions {11, 12}) — its root is a
+  **bare JSON list** and it is **NOT** produced by
+  `scripts/generate_parity_fixtures.py` (which writes only the four wrapped fixtures
+  above). Vectors feed through the production `select_experience` seam:
+  `version <= 11` exercises the untouched packed path, `version > 11` the anchored
+  layout. Do not hand-edit — refresh from the shared cross-SDK source.
 - **Tracking-payload parity** (`tracking_payloads.json` /
   `test_js_tracking_payload_parity.py`) is owned by **NFR21 / Story 2.2**, NOT this
   harness. It is intentionally not authored or duplicated here.
