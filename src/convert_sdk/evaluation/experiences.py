@@ -217,3 +217,42 @@ def _find_variation(
         if str(variation.get("id")) == str(variation_id):
             return variation
     return None
+
+
+def get_preview_decision(
+    experience: Mapping[str, Any], variation_id: str
+) -> Optional[ExperienceResult]:
+    """Force-decide ``variation_id`` on ``experience``, bypassing every normal
+    qualification/bucketing gate (qs-02 preview forced-decision primitive).
+
+    Unlike :func:`select_experience`, this takes a resolved experience mapping
+    directly (never a snapshot) and has no ``visitor_id`` — a preview
+    experience fetched via ``?exp=`` may not be registered in the installed
+    config, and the forced decision does not depend on any particular visitor.
+    It bypasses audiences/segments/locations, experience status, variation
+    status/traffic, and the bucketing hash entirely by construction: it simply
+    resolves the variation by id (via :func:`_find_variation`, which applies
+    no status/traffic filter) and wraps it in the same typed
+    :class:`ExperienceResult` shape :func:`select_experience` returns.
+
+    Returns ``None`` for an unknown ``variation_id`` — a normal miss, never an
+    exception, with no logging (the caller, ``Context.set_preview``, logs the
+    warning) and no side effects (no store, no tracker; none are accepted as
+    parameters).
+    """
+    variation = _find_variation(experience, variation_id)
+    if variation is None:
+        return None
+
+    experience_id = experience.get("id")
+    experience_key = experience.get("key")
+
+    return ExperienceResult(
+        experience_key=str(experience_key) if experience_key is not None else "",
+        experience_id=str(experience_id) if experience_id is not None else "",
+        variation_id=str(variation.get("id")),
+        variation_key=(
+            str(variation.get("key")) if variation.get("key") is not None else None
+        ),
+        variation=variation,
+    )
