@@ -55,7 +55,9 @@ set this header on every tracking request.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import threading
+import time
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
 
 import httpx
@@ -63,6 +65,28 @@ import httpx
 from convert_sdk._internal.redaction import redact_url
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.errors import ConfigLoadError, TrackingDeliveryError
+
+#: Process-wide TTL for the ``?exp=`` config-by-experience memo (qs-02 PY-4 /
+#: decision P3, JS parity: ``CONFIG_BY_EXPERIENCE_TTL = 60000`` ms).
+_CONFIG_BY_EXPERIENCE_TTL_SECONDS = 60.0
+
+#: Process-wide memo of resolved config-by-experience bodies, keyed by
+#: ``f"{sdk_key}:{experience_id}"``. Value is ``(body, fetched_at)`` where
+#: ``fetched_at`` is a wall-clock timestamp from :data:`_now`. Never touches
+#: the DataStore -- this is a purely in-memory, process-wide cache (decision
+#: P3; qs-02 contract Section 2).
+_CONFIG_BY_EXPERIENCE_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
+
+#: Single global lock guarding the ENTIRE check+fetch+store critical section
+#: for `_CONFIG_BY_EXPERIENCE_CACHE` (decision P3) -- deliberately a single
+#: lock, not per-key, since config-by-experience fetches are rare (QA/preview
+#: only) and this keeps the implementation simple without meaningfully
+#: hurting concurrency.
+_CONFIG_BY_EXPERIENCE_LOCK = threading.Lock()
+
+#: Monkeypatchable wall-clock seam (tests replace this with a fixed/stepping
+#: callable to make TTL expiry deterministic without real sleeping).
+_now = time.time
 
 
 class HttpxTransport:
@@ -115,10 +139,35 @@ class HttpxTransport:
         route = f"/api/v1/config/{config.sdk_key}"
         return f"{route}?{query}" if query else route
 
+    @staticmethod
+    def _build_experience_query(config: SDKConfig, experience_id: str) -> str:
+        """Query for the ``?exp=`` config-by-experience fetch (qs-02 PY-4).
+
+        Unlike :meth:`_build_query`, ``_conv_low_cache=1`` is forced
+        UNCONDITIONALLY here (never gated on ``cache_level``) since a preview
+        lookup must always bypass the CDN cache. Param order: ``exp``, then
+        ``_conv_low_cache=1``, then ``debug_token`` last when set.
+        """
+        params = [("exp", experience_id), ("_conv_low_cache", "1")]
+        if config.debug_token:
+            params.append(("debug_token", config.debug_token))
+        return urlencode(params)
+
+    @staticmethod
+    def _build_experience_route(config: SDKConfig, experience_id: str) -> str:
+        query = HttpxTransport._build_experience_query(config, experience_id)
+        route = f"/api/v1/config/{config.sdk_key}"
+        return f"{route}?{query}" if query else route
+
     # --- transport port ----------------------------------------------------
 
-    def fetch_config(self, config: SDKConfig) -> Dict[str, Any]:
-        route = self._build_route(config)
+    def _get_config_json(self, route: str) -> Dict[str, Any]:
+        """Shared GET + typed-error contract for both config-fetch routes.
+
+        Reused by :meth:`fetch_config` and :meth:`fetch_config_by_experience`
+        so the two routes share the exact same error-handling behavior
+        (NFR23 / qs-08 shim) rather than diverging.
+        """
         # Endpoint used only for diagnostics; ConfigLoadError redacts the query.
         endpoint = f"{self._config.base_url}{route}"
         try:
@@ -152,6 +201,40 @@ class HttpxTransport:
                 status_code=response.status_code,
             )
         return body
+
+    def fetch_config(self, config: SDKConfig) -> Dict[str, Any]:
+        route = self._build_route(config)
+        return self._get_config_json(route)
+
+    def fetch_config_by_experience(
+        self, config: SDKConfig, experience_id: str
+    ) -> Dict[str, Any]:
+        """Fetch config scoped to a single experience via ``?exp={id}``.
+
+        Memoized process-wide (module-level, thread-safe, 60s wall-clock
+        TTL -- qs-02 PY-4 AC8 / decision P3): the ENTIRE check+fetch+store
+        sequence for any key is serialized under a single global lock so
+        concurrent resolutions of the SAME ``(sdk_key, experience_id)``
+        collapse into exactly one real fetch. A failed fetch (raised
+        :class:`~convert_sdk.errors.ConfigLoadError`) is never memoized, so
+        the next call retries a real fetch (JS parity: a transient error must
+        not strand a QA/preview session for the full TTL window).
+
+        Never touches the DataStore -- this cache is purely in-memory and
+        process-wide, independent of any per-visitor persistence boundary.
+        """
+        cache_key = f"{config.sdk_key}:{experience_id}"
+        with _CONFIG_BY_EXPERIENCE_LOCK:
+            cached = _CONFIG_BY_EXPERIENCE_CACHE.get(cache_key)
+            if cached is not None:
+                body, fetched_at = cached
+                if _now() - fetched_at < _CONFIG_BY_EXPERIENCE_TTL_SECONDS:
+                    return body
+
+            route = self._build_experience_route(config, experience_id)
+            body = self._get_config_json(route)
+            _CONFIG_BY_EXPERIENCE_CACHE[cache_key] = (body, _now())
+            return body
 
     # --- tracking delivery (metrics host) ------------------------------------
 

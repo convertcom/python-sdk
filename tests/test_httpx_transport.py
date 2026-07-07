@@ -22,6 +22,7 @@ import httpx
 import pytest
 import respx
 
+import convert_sdk.adapters.transport.httpx_transport as httpx_transport_module
 from convert_sdk.adapters.transport.httpx_transport import HttpxTransport
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.errors import ConfigLoadError, TransportError
@@ -329,6 +330,22 @@ def test_fetch_config_request_carries_debug_token_params(debug_token, cache_leve
 # never-DataStore invariants are covered separately in the sibling file
 # ``tests/test_config_by_experience_memo.py`` (new file -- different harness:
 # clock injection + concurrency plumbing, not just URL-shape assertions).
+
+
+@pytest.fixture(autouse=True)
+def _clear_config_by_experience_memo():
+    """The tests below reuse ``sdk_key="sdkkey123"`` / ``experience_id="e1"``
+    against the process-wide 60s memo (see
+    ``tests/test_config_by_experience_memo.py`` for the full memo contract) --
+    without clearing it, an earlier case in this file populates the cache and
+    a later case silently observes the stale entry instead of issuing its own
+    request. Scoped to this file only (test-isolation fix, not a behavior
+    change)."""
+    with httpx_transport_module._CONFIG_BY_EXPERIENCE_LOCK:
+        httpx_transport_module._CONFIG_BY_EXPERIENCE_CACHE.clear()
+    yield
+    with httpx_transport_module._CONFIG_BY_EXPERIENCE_LOCK:
+        httpx_transport_module._CONFIG_BY_EXPERIENCE_CACHE.clear()
 
 
 def test_build_experience_route_emits_exp_and_forced_low_cache():
