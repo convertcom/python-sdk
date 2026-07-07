@@ -186,6 +186,17 @@ class SDKConfig:
             route appends ``environment={environment}`` (JS parity).
         cache_level: Optional cache level. ``"low"`` appends
             ``_conv_low_cache=1`` to the config route (JS parity).
+        debug_token: Optional experiment-preview debug token (qs-02 AC1).
+            When set, the config route carries ``debug_token={value}`` AND a
+            forced ``_conv_low_cache=1`` (regardless of ``cache_level``, and
+            never duplicated when ``cache_level="low"`` already requests it) —
+            preview requests must always bypass the CDN cache. The token rides
+            the config-fetch route ONLY; it is never sent on the tracking
+            (metrics) request. Defaults to ``None`` (byte-for-byte opt-in, no
+            behavior change for callers who never set it). Excluded from
+            ``repr()`` (``field(repr=False)``) so it never leaks into logs
+            (AC2) — unlike ``TransportConfig.auth_secret``, which is not
+            repr-redacted today.
         transport: Transport settings used for ``sdk_key`` initialization.
         batch_size: Number of queued tracking events that triggers a batch-size
             queue release. Defaults to ``10`` — the JS SDK ``DEFAULT_BATCH_SIZE``
@@ -223,6 +234,7 @@ class SDKConfig:
     data: Optional[Dict[str, Any]] = None
     environment: Optional[str] = None
     cache_level: Optional[str] = None
+    debug_token: Optional[str] = field(default=None, repr=False)
     transport: TransportConfig = field(default_factory=TransportConfig)
     batch_size: int = 10
     auto_flush_interval_ms: Optional[int] = None
@@ -252,6 +264,11 @@ class SDKConfig:
             raise InvalidConfigError(
                 f"SDKConfig 'cache_level' must be one of {_VALID_CACHE_LEVELS}; "
                 f"got {self.cache_level!r}"
+            )
+        if self.debug_token is not None and not isinstance(self.debug_token, str):
+            raise InvalidConfigError(
+                "SDKConfig 'debug_token' must be a string or None; "
+                f"got {self.debug_token!r}"
             )
         if not isinstance(self.batch_size, int) or self.batch_size < 1:
             raise InvalidConfigError(

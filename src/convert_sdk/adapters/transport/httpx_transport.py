@@ -9,16 +9,22 @@ by the real Convert config-serving CDN and matches the PHP SDK's generated clien
 (``ProjectConfigApi``, server base ``https://cdn-4.convertexperiments.com/api/v1``,
 resource path ``/config/{sdkKey}``).
 
-Two optional query parameters are appended conditionally:
+Up to three optional query parameters are appended conditionally:
 
 * ``environment={environment}`` — present only when a non-default environment
   is configured.
-* ``_conv_low_cache=1`` — present only when the cache level is ``"low"``.
+* ``debug_token={debug_token}`` — present only when ``SDKConfig.debug_token``
+  is set (qs-02 AC1, experiment-preview). Config-fetch route ONLY — never sent
+  on the tracking (metrics) request.
+* ``_conv_low_cache=1`` — present when the cache level is ``"low"``, OR
+  forced (regardless of ``cache_level``) whenever ``debug_token`` is set,
+  since a preview fetch must always bypass the CDN cache. Never duplicated
+  when both conditions independently ask for it.
 
 These parameters mirror the query shape used by the JS SDK. The JS implementation
-concatenates the two parameters without a separator (producing
+concatenates the two legacy parameters without a separator (producing
 ``?environment=prod_conv_low_cache=1``). This adapter preserves the *intent*
-(both parameters present, conditionally) while emitting a well-formed, parseable
+(each parameter present, conditionally) while emitting a well-formed, parseable
 query string (parameters joined with ``&``) — see the Story 1.2 readiness note.
 Tests assert presence/absence of each parameter, not the malformed concatenation.
 
@@ -92,7 +98,14 @@ class HttpxTransport:
         params = []
         if config.environment:
             params.append(("environment", config.environment))
-        if config.cache_level == "low":
+        if config.debug_token:
+            # A preview fetch must always bypass the CDN cache, regardless of
+            # cache_level — force _conv_low_cache=1 without duplicating it
+            # when cache_level="low" already asks for the same param (qs-02
+            # AC1).
+            params.append(("debug_token", config.debug_token))
+            params.append(("_conv_low_cache", "1"))
+        elif config.cache_level == "low":
             params.append(("_conv_low_cache", "1"))
         return urlencode(params) if params else ""
 
