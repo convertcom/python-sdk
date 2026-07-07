@@ -59,3 +59,35 @@ class Transport(Protocol):
     def __enter__(self) -> "Transport": ...
 
     def __exit__(self, *exc: Any) -> None: ...
+
+
+@runtime_checkable
+class SupportsPreviewFetch(Protocol):
+    """Additive capability Protocol for experiment-preview support (qs-02 PY-5).
+
+    ``Transport`` itself is a PUBLIC, semver-governed extension point (a real
+    integrator can construct ``Core(config, transport=MyTransport())``), so it
+    never gains a new REQUIRED method for a rare, opt-in capability — doing so
+    would be a breaking change for any existing/future custom ``Transport``
+    implementation (decision-log I22). Instead, a concrete transport that ALSO
+    implements this one method opts into ``Context.set_preview``'s ``?exp=``
+    fetch-through automatically via structural typing: ``Core`` duck-checks
+    ``isinstance(transport, SupportsPreviewFetch)`` before attempting the fetch,
+    and degrades gracefully (no fetch attempted, ``Context.set_preview`` warns
+    and stays inert) for a transport that does not implement it. The concrete
+    :class:`~convert_sdk.adapters.transport.httpx_transport.HttpxTransport`
+    already implements this method, so it satisfies this Protocol with no
+    changes.
+    """
+
+    def fetch_config_by_experience(
+        self, config: "SDKConfig", experience_id: str
+    ) -> Dict[str, Any]:
+        """Fetch config scoped to a single experience via ``?exp={experience_id}``.
+
+        Returns the decoded JSON body as a dict. Raises
+        :class:`~convert_sdk.errors.ConfigLoadError` on any transport/HTTP/decode
+        failure — the caller (``Core``/``Context.set_preview``) is responsible
+        for catching it and downgrading to the AC7 inert-with-warning contract.
+        """
+        ...

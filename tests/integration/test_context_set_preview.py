@@ -325,6 +325,54 @@ def test_run_experiences_includes_forced_result_for_an_already_local_preview_tar
         core.close()
 
 
+def test_run_experiences_synthesizes_forced_result_for_a_fetch_only_preview_target(
+    respx_mock,
+) -> None:
+    """Decision I27's post-loop synthesis branch: when the preview target is
+    NOT present in the local snapshot (resolved only via the ``?exp=`` fetch,
+    mirroring AC3's ``test_run_experience_forces_variation_delivered_only_via_exp_fetch``),
+    ``run_experiences()`` must APPEND the already-resolved forced result to its
+    output rather than replace it -- proven by asserting the forced target
+    AND a separate, normally-loaded local experience are BOTH present.
+    """
+    other = _experience(
+        "e-other-local",
+        "other-local-key",
+        variations=[_variation("v-other", "var-other", traffic_allocation=100.0)],
+    )
+    local_config = _config([other])
+
+    draft_experience = _experience(
+        "e-fetch-only",
+        "fetch-only-key",
+        status="draft",
+        variations=[_variation("v-draft", "var-draft", traffic_allocation=100.0)],
+    )
+    exp_scoped_body = _config([draft_experience])
+
+    def _config_side_effect(request: httpx.Request) -> httpx.Response:
+        if "exp" in request.url.params:
+            return httpx.Response(200, json=exp_scoped_body)
+        return httpx.Response(200, json=local_config)
+
+    respx_mock.get(f"/api/v1/config/{SDK_KEY}").mock(side_effect=_config_side_effect)
+
+    transport = HttpxTransport(
+        TransportConfig(base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL)
+    )
+    core = _remote_core(transport=transport)
+    try:
+        ctx = core.create_context("visitor-fetch-only-bulk")
+        ctx.set_preview("e-fetch-only", "v-draft")
+
+        results = {r.experience_key: r for r in ctx.run_experiences()}
+
+        assert results["fetch-only-key"].variation_id == "v-draft"
+        assert results["other-local-key"].variation_id == "v-other"
+    finally:
+        core.close()
+
+
 # --- AC6: isolation ----------------------------------------------------------
 
 
@@ -516,6 +564,72 @@ def test_set_preview_fetch_transport_failure_is_inert_and_warns(
             ctx.set_preview("e-unreachable", "v1")  # must not raise
 
         assert any("preview" in r.getMessage().lower() for r in caplog.records)
+    finally:
+        core.close()
+
+
+# --- discovered work (decision-log I22 open item): a custom Transport that ---
+# --- does NOT implement the additive SupportsPreviewFetch capability --------
+
+
+class _MinimalTransport:
+    """A conforming ``Transport`` implementation that deliberately does NOT
+    implement the additive ``SupportsPreviewFetch`` capability (decision I22 --
+    ``Transport`` itself never gained a new REQUIRED method for this rare,
+    opt-in capability, so an existing/future custom transport implementing only
+    the required three methods must keep working). Used to prove ``Core``'s
+    ``isinstance(transport, SupportsPreviewFetch)`` duck-check degrades
+    gracefully instead of raising an ``AttributeError`` for the missing method
+    (RED open item #2 from decision-log I22, resolved by this test).
+    """
+
+    def __init__(self, config_body: Dict[str, Any]) -> None:
+        self._config_body = config_body
+        self.fetch_config_calls = 0
+
+    def fetch_config(self, config: SDKConfig) -> Dict[str, Any]:
+        self.fetch_config_calls += 1
+        return self._config_body
+
+    def send_tracking(self, payload: Dict[str, Any], *, sdk_key: str) -> int:
+        return 200
+
+    def close(self) -> None:
+        return None
+
+    def __enter__(self) -> "_MinimalTransport":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        return None
+
+
+def test_set_preview_custom_transport_without_preview_fetch_capability_is_inert_and_warns(
+    minimal_config, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A snapshot-absent preview target on a ``Core`` wired to a custom
+    ``Transport`` lacking ``fetch_config_by_experience`` must degrade to the
+    SAME inert-with-warning contract as an unresolvable id -- never an
+    ``AttributeError`` for calling a method the transport does not implement."""
+    transport = _MinimalTransport(minimal_config)
+    core = Core(
+        SDKConfig(
+            sdk_key=SDK_KEY,
+            transport=TransportConfig(
+                base_url=MOCK_BASE_URL, track_base_url=MOCK_TRACK_BASE_URL
+            ),
+        ),
+        transport=transport,
+    ).initialize()
+    try:
+        ctx = core.create_context("visitor-no-preview-capability")
+        with caplog.at_level(logging.WARNING, logger="convert_sdk"):
+            ctx.set_preview("e-not-local", "v1")  # must not raise
+
+        assert any("preview" in r.getMessage().lower() for r in caplog.records)
+        # Only the ordinary init-time config fetch happened -- no ?exp= call
+        # was ever attempted against a transport that cannot serve it.
+        assert transport.fetch_config_calls == 1
     finally:
         core.close()
 
