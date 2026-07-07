@@ -32,6 +32,7 @@ from convert_sdk._internal.redaction import SafeContext, fingerprint_visitor
 from convert_sdk.domain.context_state import ContextState
 from convert_sdk.domain.results import (
     ConversionResult,
+    ConversionStatus,
     CustomSegmentsResult,
     DiagnosticReason,
     EntityDiagnostic,
@@ -323,6 +324,17 @@ class Context:
         this visitor's state key (:func:`visitor_state_key`), never another
         visitor's and never a ``Core``-global key.
 
+        PY-6 (qs-02, decision P2): also a no-op once a preview is active on
+        THIS context (``self._preview is not None``) -- every call site that
+        routes through here (``set_attributes`` / ``set_segments`` /
+        ``run_custom_segments``) writes ZERO ``DataStore`` entries under
+        preview (AC5). The in-memory ``ContextState`` rebind performed by the
+        caller BEFORE this method runs is unaffected, so the visitor state
+        still exists as per-context in-memory scratch and evaluation on this
+        same context continues to see it -- only the durable write is
+        suppressed. This is per-context state, so a concurrent non-preview
+        ``Context`` sharing the same ``DataStore`` persists normally (AC6).
+
         The persisted value is a structured envelope
         ``{"attributes": {...}, "segments": {...}}`` so a later
         ``create_context(visitor_id)`` round-trips BOTH the visitor attributes
@@ -331,7 +343,7 @@ class Context:
         a plain ``set`` of serialized state; no business logic lives in the
         store.
         """
-        if self._data_store is None:
+        if self._data_store is None or self._preview is not None:
             return None
         key = visitor_state_key(self._state.visitor_id)
         self._data_store.set(
@@ -553,15 +565,22 @@ class Context:
     ) -> None:
         """Shared post-resolution bookkeeping for a single experience result.
 
-        Applied identically to a normal or a preview-forced result (PY-5 wires
-        the decision path only; it deliberately does NOT gate tracking/
-        persistence on preview state — that zero-trace suppression is PY-6's
-        job).
+        Applied identically to a normal or a preview-forced result. PY-6
+        (qs-02, decision P2): once a preview is active on THIS context
+        (``self._preview is not None``), the bucketing-activation tracker call
+        is unconditionally suppressed -- for the forced target AND for every
+        other, normally-decided experience on the SAME context (AC5) --
+        overriding a per-call ``enable_tracking=True``. Suppression keys off
+        per-context ``self._preview`` state only, so a concurrent non-preview
+        ``Context`` sharing the same ``Tracker``/``DataStore`` is unaffected
+        (AC6). Local diagnostic logging (``_log_bucketing``) is unrelated to
+        the network/persistence "trace" this suppression targets and is
+        deliberately left unconditional.
         """
         if result is None:
             return
         self._log_bucketing(result)
-        if enable_tracking and self._tracker is not None:
+        if enable_tracking and self._tracker is not None and self._preview is None:
             self._tracker.track_bucketing(
                 visitor_id=self._state.visitor_id,
                 experience_id=result.experience_id,
@@ -792,7 +811,24 @@ class Context:
 
         The enqueue path performs no network I/O and stays lightweight (NFR5);
         delivery happens at flush time (``Core.flush()``).
+
+        PY-6 (qs-02, decision P2 / I32): ``track_conversion`` has no
+        ``enable_tracking`` parameter, so once a preview is active on THIS
+        context (``self._preview is not None``) it is an UNCONDITIONAL no-op —
+        no dedup-marker read/write, no queue enqueue, no network I/O — for
+        EVERY call regardless of ``force_multiple``. The returned
+        :class:`~convert_sdk.domain.results.ConversionResult` reuses the
+        existing ``DEDUPLICATED`` status (``tracked=False``,
+        ``reason="deduplicated"``) rather than introducing a new
+        ``ConversionStatus`` member (see decision log I32): it is the closest
+        existing "call resulted in no enqueue, not because the goal is
+        unknown" outcome, and no test asserts on the exact status/reason
+        value under preview (I32), only on ``tracked is False``.
         """
+        if self._preview is not None:
+            result = self._preview_suppressed_conversion(goal_key)
+            self._log_conversion(result)
+            return result
         if self._tracker is not None:
             result = self._tracker.track(
                 visitor_id=self._state.visitor_id,
@@ -817,6 +853,29 @@ class Context:
             )
         self._log_conversion(result)
         return result
+
+    def _preview_suppressed_conversion(self, goal_key: str) -> ConversionResult:
+        """Build the untracked :class:`ConversionResult` for a preview context.
+
+        Resolves ``goal_id`` from the snapshot when the goal is known (purely
+        for diagnosability, mirroring the fields a real outcome would carry)
+        WITHOUT touching the tracker, dedup store, or queue. Reuses
+        ``ConversionStatus.DEDUPLICATED`` (decision log I32) rather than a new
+        enum member — ``tracked`` is ``False`` either way, which is the only
+        PRD-contractual signal this call site guarantees.
+        """
+        goal = self._snapshot.get_goal_by_key(goal_key)
+        goal_id: Optional[str] = None
+        if goal is not None:
+            raw_goal_id = goal.get("id")
+            goal_id = str(raw_goal_id) if raw_goal_id is not None else None
+        return ConversionResult(
+            status=ConversionStatus.DEDUPLICATED,
+            goal_key=goal_key,
+            goal_id=goal_id,
+            visitor_id=self._state.visitor_id,
+            event=None,
+        )
 
     # --- entity lookup (Story 3.4 / FR28) ----------------------------------
 
