@@ -105,6 +105,51 @@ def test_sdkconfig_accepts_caller_supplied_logger():
     assert cfg.logger is custom
 
 
+def test_sdkconfig_debug_token_defaults_to_none():
+    """PY-1 / qs-02 AC1: the debug_token option defaults to None (byte-for-byte
+    opt-in — no behavior change for callers who never set it)."""
+    from convert_sdk import SDKConfig
+
+    cfg = SDKConfig(sdk_key="k")
+    assert cfg.debug_token is None
+
+
+def test_sdkconfig_accepts_debug_token_string():
+    from convert_sdk import SDKConfig
+
+    cfg = SDKConfig(sdk_key="k", debug_token="preview-tok-abc123")
+    assert cfg.debug_token == "preview-tok-abc123"
+
+
+@pytest.mark.parametrize(
+    "invalid_debug_token",
+    [123, 1.5, True, [], {}, ("a", "b")],
+    ids=["int", "float", "bool", "list", "dict", "tuple"],
+)
+def test_sdkconfig_rejects_non_string_debug_token(invalid_debug_token):
+    """PY-1 / qs-02 AC1: strict validation mirroring the cache_level precedent
+    (config.py cache_level check) — a non-str, non-None debug_token is a typed
+    InvalidConfigError, never silently coerced or ignored."""
+    from convert_sdk import InvalidConfigError, SDKConfig
+
+    with pytest.raises(InvalidConfigError):
+        SDKConfig(sdk_key="k", debug_token=invalid_debug_token)
+
+
+def test_sdkconfig_repr_never_contains_debug_token():
+    """PY-1 / qs-02 AC2: the token must never appear in repr(SDKConfig(...)).
+
+    Decision P1 (decision-log.md): TransportConfig.auth_secret is NOT
+    repr-redacted today (plain frozen dataclass, no field(repr=False)), so
+    debug_token must NOT mirror that leaky behavior — it needs its own
+    field(repr=False) (or a custom __repr__) to satisfy AC2.
+    """
+    from convert_sdk import SDKConfig
+
+    cfg = SDKConfig(data={"account_id": "1", "project": {"id": "2"}}, debug_token="SECRETVALUE")
+    assert "SECRETVALUE" not in repr(cfg)
+
+
 def test_transportconfig_defaults_to_https_endpoint():
     from convert_sdk import TransportConfig
 
