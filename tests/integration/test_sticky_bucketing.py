@@ -320,13 +320,24 @@ def test_ac6_enable_storage_false_suppresses_only_bucketing_write() -> None:
 
     assert result is not None
     assert dict(ctx._state.bucketing) == {}
-    assert store.set_calls == []
+    # enable_storage gates ONLY the bucketing-decision envelope persist
+    # (the qs-03 concern, keyed under visitor_state_key's "state:" namespace).
+    # It does NOT suppress the pre-existing, unrelated Story 2.5
+    # bucketing-activation dedup-marker write (keyed under a distinct
+    # "bucketing:" namespace, see tracking/deduplication.py
+    # bucketing_marker_key) -- that write is gated by enable_tracking (default
+    # True here, untouched by this call), not enable_storage.
+    own_calls = [call for call in store.set_calls if call[0] == visitor_state_key("v-ac6")]
+    assert own_calls == []
 
     # An UNRELATED set_attributes persist on the SAME context is unaffected --
     # enable_storage gates only the bucketing write, never persistence overall.
     ctx.set_attributes({"plan": "pro"})
-    assert len(store.set_calls) == 1
-    _, persisted, _ = store.set_calls[-1]
+    own_calls_after_set_attributes = [
+        call for call in store.set_calls if call[0] == visitor_state_key("v-ac6")
+    ]
+    assert len(own_calls_after_set_attributes) == 1
+    _, persisted, _ = own_calls_after_set_attributes[-1]
     assert persisted["attributes"] == {"plan": "pro"}
 
 
@@ -386,3 +397,47 @@ def test_ac8_audience_mismatch_gates_stored_decision_returns_none() -> None:
     result = ctx_gated.run_experience(EXP_A_KEY)
 
     assert result is None
+
+
+# --- AC4 (row4): unresolvable stored variation falls through to fresh hash --
+
+
+def test_ac4_unresolvable_stored_vid_falls_through_and_updates_map(monkeypatch) -> None:
+    store = _SpyDataStore()
+    # A stored id absent from exp-a's config (neither VAR_A1 nor VAR_A2).
+    store.set(
+        visitor_state_key("v-ac4"),
+        {"attributes": {}, "segments": {}, "bucketing": {EXP_A_ID: "100999"}},
+    )
+    core = _core(store)
+    ctx = core.create_context("v-ac4")
+    assert dict(ctx._state.bucketing) == {EXP_A_ID: "100999"}
+
+    # Unlike AC2's stub spy (never expected to be called), the fall-through
+    # path must still exercise the REAL deterministic hash so the "falls
+    # through to a resolvable variation" assertion is meaningful -- forward to
+    # the real ``get_bucket_value_for_visitor`` while counting invocations.
+    calls: List[int] = []
+
+    def _forwarding_hash(*args: Any, **kwargs: Any) -> int:
+        calls.append(1)
+        return get_bucket_value_for_visitor(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "convert_sdk.evaluation.experiences.get_bucket_value_for_visitor", _forwarding_hash
+    )
+
+    result = ctx.run_experience(EXP_A_KEY)
+
+    assert result is not None
+    assert result.variation_id in {VAR_A1, VAR_A2}
+    assert result.variation_id != "100999"
+    assert len(calls) >= 1
+
+    # The in-memory map is updated to the fresh id, overwriting the stale one.
+    assert ctx._state.bucketing[EXP_A_ID] == result.variation_id
+
+    own_calls = [call for call in store.set_calls if call[0] == visitor_state_key("v-ac4")]
+    assert len(own_calls) >= 1
+    _, persisted, _ = own_calls[-1]
+    assert persisted["bucketing"][EXP_A_ID] == result.variation_id

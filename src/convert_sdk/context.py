@@ -561,6 +561,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
 
     def _record_experience_result(
@@ -596,10 +597,35 @@ class Context:
         attributes: Optional[Mapping[str, Any]],
         location_attributes: Optional[Mapping[str, Any]],
         enable_tracking: bool,
+        enable_storage: bool = True,
     ) -> Optional[ExperienceResult]:
-        """Resolve one experience's result and apply the shared bookkeeping."""
+        """Resolve one experience's result and apply the shared bookkeeping.
+
+        qs-03 PY-3: after the shared tracking/logging bookkeeping, a fresh
+        (non-sticky, non-preview-forced) bucketing decision is persisted into
+        the visitor-state envelope's ``bucketing`` map — write-after-hash, per
+        the spec algorithm. The write is gated three ways (ALL must hold):
+
+        * ``result is not None`` — a real decision was produced.
+        * ``enable_storage`` — the new per-call flag (default ``True``).
+        * ``self._preview is None`` — no preview active on this context.
+
+        The final ``bucketing.get(result.experience_id) != result.variation_id``
+        check makes the write a no-op on a sticky read-back (the stored value
+        already equals the fresh/sticky result), so a sticky hit never
+        re-persists, while a fall-through (AC4, stored id no longer resolves)
+        still overwrites the stale entry with the freshly hashed one.
+        """
         result = self._resolve_experience_result(experience_key, attributes, location_attributes)
         self._record_experience_result(result, enable_tracking)
+        if (
+            result is not None
+            and enable_storage
+            and self._preview is None
+            and self._state.bucketing.get(result.experience_id) != result.variation_id
+        ):
+            self._state = self._state.with_bucketing({result.experience_id: result.variation_id})
+            self._persist_visitor_state()
         return result
 
     # --- evaluation surface ------------------------------------------------
@@ -626,6 +652,7 @@ class Context:
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         enable_tracking: bool = True,
+        enable_storage: bool = True,
     ) -> Optional[ExperienceResult]:
         """Evaluate a single experience by key for this visitor.
 
@@ -635,6 +662,12 @@ class Context:
         qualifies and buckets into a variation, or ``None`` for any normal miss
         (missing experience, unqualified visitor, no active variation). Never
         raises for normal evaluation outcomes and performs no network I/O.
+
+        A successful bucket also persists the decision (qs-03 sticky-bucketing
+        persistence) into the visitor-state ``bucketing`` map — in-memory
+        immediately and through the injected ``DataStore`` when one is
+        configured — so a later call for the SAME ``experience_key`` returns
+        the stored decision without re-hashing (see ``enable_storage`` below).
 
         Args:
             experience_key: The experience key to evaluate.
@@ -648,9 +681,17 @@ class Context:
                 :class:`~convert_sdk.domain.results.ExperienceResult` is
                 identical regardless of this flag — it gates tracking only, not
                 evaluation. Must be passed as a keyword argument.
+            enable_storage: When ``True`` (the default), a fresh bucketing
+                decision is persisted into the visitor-state ``bucketing`` map
+                (parity with JS ``BucketingAttributes.enableStorage``). When
+                ``False``, nothing is persisted for THIS call — the returned
+                result is unaffected. Gates ONLY the bucketing-decision
+                persist; unrelated persistence (``set_attributes`` /
+                ``set_segments``) is untouched. Must be passed as a keyword
+                argument.
         """
         return self._evaluate_and_record(
-            experience_key, attributes, location_attributes, enable_tracking
+            experience_key, attributes, location_attributes, enable_tracking, enable_storage
         )
 
     def run_experiences(
@@ -659,6 +700,7 @@ class Context:
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         enable_tracking: bool = True,
+        enable_storage: bool = True,
     ) -> List[ExperienceResult]:
         """Evaluate all applicable experiences for this visitor.
 
@@ -675,6 +717,10 @@ class Context:
                 result enqueues a bucketing activation event via the tracker
                 (Story 2.5). When ``False``, no bucketing events are enqueued
                 for any resolved experience. Must be passed as a keyword argument.
+            enable_storage: When ``True`` (the default), each fresh bucketing
+                decision is persisted into the visitor-state ``bucketing`` map
+                (see :meth:`run_experience`). Must be passed as a keyword
+                argument.
 
         A forced preview target (:meth:`set_preview`) that already exists in the
         loaded snapshot is naturally overridden here as this method iterates the
@@ -692,7 +738,7 @@ class Context:
             key_str = str(key)
             seen_keys.add(key_str)
             result = self._evaluate_and_record(
-                key_str, attributes, location_attributes, enable_tracking
+                key_str, attributes, location_attributes, enable_tracking, enable_storage
             )
             if result is not None:
                 results.append(result)
@@ -703,7 +749,11 @@ class Context:
             and self._preview.experience_key not in seen_keys
         ):
             forced = self._evaluate_and_record(
-                self._preview.experience_key, attributes, location_attributes, enable_tracking
+                self._preview.experience_key,
+                attributes,
+                location_attributes,
+                enable_tracking,
+                enable_storage,
             )
             if forced is not None:
                 results.append(forced)
