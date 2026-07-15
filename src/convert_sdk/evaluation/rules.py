@@ -25,6 +25,17 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+#: qs-04 mutual-exclusion audience rule type (`bucketed_into_experience_key`).
+#: Public (not underscore-prefixed) because it is a cross-module contract
+#: value: this module (``rules.py``) owns the constant, but the dispatch site
+#: that consumes it lives in a different ``evaluation/`` module added by a
+#: later task (PY-3) — the same public-constant convention used by
+#: ``evaluation/bucketing.py``'s ``DEFAULT_HASH_SEED`` / ``DEFAULT_MAX_TRAFFIC``
+#: for values shared across module boundaries. **Currently inert/unused**:
+#: PY-1 only adds the constant; no dispatch on it exists yet (that lands in
+#: PY-3, see ``qs-04-mutual-exclusion-rule.md``).
+RULE_TYPE_BUCKETED_INTO_EXPERIENCE_KEY = "bucketed_into_experience_key"
+
 # ---------------------------------------------------------------------------
 # Comparison operators (mirror packages/utils/src/comparisons.ts).
 # Each operator takes (data_value, test_against) and returns a bool BEFORE
