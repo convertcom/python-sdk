@@ -192,3 +192,112 @@ def test_context_state_equality_includes_segments():
     c = ContextState(visitor_id="v", default_segments={"x": "2"}, snapshot=snap)
     assert a == b
     assert a != c
+
+
+# --- qs-03 PY-1: bucketing substrate field + with_bucketing -----------------
+#
+# The persisted per-visitor sticky-bucketing decision map (FR42 / qs-03 AC1).
+# Mirrors the DISTINCT-field + defensive-copy + read-only-wrap + immutable
+# clone-and-rebind pattern already established for ``default_segments`` /
+# ``with_segments`` above. `bucketing` is a THIRD distinct field: never merged
+# into ``visitor_attributes`` or ``default_segments``.
+
+
+def test_bucketing_defaults_to_empty_and_is_distinct_from_other_fields():
+    state = ContextState(
+        visitor_id="v",
+        visitor_attributes={"country": "US"},
+        default_segments={"browser": "chrome"},
+        snapshot=_snapshot(),
+    )
+    assert dict(state.bucketing) == {}
+    assert dict(state.visitor_attributes) == {"country": "US"}
+    assert dict(state.default_segments) == {"browser": "chrome"}
+
+
+def test_bucketing_view_is_read_only():
+    state = ContextState(
+        visitor_id="v",
+        bucketing={"100111": "100901"},
+        snapshot=_snapshot(),
+    )
+    with pytest.raises(TypeError):
+        state.bucketing["100111"] = "100903"  # type: ignore[index]
+
+
+def test_bucketing_is_copied_defensively():
+    source = {"100111": "100901"}
+    state = ContextState(visitor_id="v", bucketing=source, snapshot=_snapshot())
+    source["100111"] = "100903"  # mutate caller dict after construction
+    assert dict(state.bucketing) == {"100111": "100901"}
+
+
+def test_with_bucketing_returns_new_state_and_does_not_mutate_original():
+    state = ContextState(
+        visitor_id="v",
+        bucketing={"100111": "100901"},
+        snapshot=_snapshot(),
+    )
+    updated = state.with_bucketing({"100222": "100902"})
+    # A NEW frozen state is returned; the original is unchanged (immutable rebind).
+    assert updated is not state
+    assert dict(state.bucketing) == {"100111": "100901"}
+    # New keys are merged in; untouched keys persist (key-merge parity).
+    assert dict(updated.bucketing) == {"100111": "100901", "100222": "100902"}
+
+
+def test_with_bucketing_new_keys_override_existing():
+    state = ContextState(
+        visitor_id="v",
+        bucketing={"100111": "100901"},
+        snapshot=_snapshot(),
+    )
+    updated = state.with_bucketing({"100111": "100903"})
+    assert dict(updated.bucketing) == {"100111": "100903"}
+
+
+def test_with_bucketing_does_not_touch_attributes_or_segments():
+    state = ContextState(
+        visitor_id="v",
+        visitor_attributes={"plan": "pro"},
+        default_segments={"browser": "chrome"},
+        bucketing={"100111": "100901"},
+        snapshot=_snapshot(),
+    )
+    updated = state.with_bucketing({"100222": "100902"})
+    assert dict(updated.visitor_attributes) == {"plan": "pro"}
+    assert dict(updated.default_segments) == {"browser": "chrome"}
+    assert dict(updated.bucketing) == {"100111": "100901", "100222": "100902"}
+
+
+@pytest.mark.parametrize("noop_value", [{}, None], ids=["empty-dict", "none"])
+def test_with_bucketing_empty_or_none_is_content_equal_noop(noop_value):
+    state = ContextState(
+        visitor_id="v",
+        bucketing={"100111": "100901"},
+        snapshot=_snapshot(),
+    )
+    noop = state.with_bucketing(noop_value)
+    # A no-op write yields a content-equal state (parity with with_attributes /
+    # with_segments determinism guarantees, AC #4-equivalent for bucketing).
+    assert dict(noop.bucketing) == {"100111": "100901"}
+    assert dict(noop.visitor_attributes) == dict(state.visitor_attributes)
+    assert dict(noop.default_segments) == dict(state.default_segments)
+
+
+def test_with_bucketing_preserves_visitor_id_and_snapshot_by_reference():
+    snap = _snapshot()
+    state = ContextState(visitor_id="v", snapshot=snap)
+    updated = state.with_bucketing({"100111": "100901"})
+    assert updated.visitor_id == "v"
+    # Snapshot is shared by reference, never copied/mutated per visitor.
+    assert updated.snapshot is snap
+
+
+def test_context_state_equality_includes_bucketing():
+    snap = _snapshot()
+    a = ContextState(visitor_id="v", bucketing={"100111": "100901"}, snapshot=snap)
+    b = ContextState(visitor_id="v", bucketing={"100111": "100901"}, snapshot=snap)
+    c = ContextState(visitor_id="v", bucketing={"100111": "100903"}, snapshot=snap)
+    assert a == b
+    assert a != c

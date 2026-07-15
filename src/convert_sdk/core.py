@@ -190,12 +190,15 @@ class Core:
         # context override matching keys (explicit construction wins). The read
         # is strictly visitor-scoped and goes through the DataStore protocol
         # only — Core (L4) owns the concrete store; downstream sees the protocol.
-        hydrated, segments = self._hydrate_visitor_state(visitor_id, visitor_attributes)
+        hydrated, segments, bucketing = self._hydrate_visitor_state(
+            visitor_id, visitor_attributes
+        )
         return Context(
             visitor_id,
             snapshot,
             visitor_attributes=hydrated,
             default_segments=segments,
+            bucketing=bucketing,
             location_attributes=location_attributes,
             tracker=self._tracker,
             data_store=self._data_store,
@@ -241,37 +244,50 @@ class Core:
         self,
         visitor_id: str,
         visitor_attributes: Optional[Mapping[str, Any]],
-    ) -> tuple[Optional[Mapping[str, Any]], Optional[Mapping[str, Any]]]:
-        """Rehydrate persisted visitor attributes AND default segments.
+    ) -> tuple[
+        Optional[Mapping[str, Any]], Optional[Mapping[str, Any]], Optional[Mapping[str, str]]
+    ]:
+        """Rehydrate persisted visitor attributes, default segments, AND bucketing.
 
         Reads this visitor's persisted ``ContextState`` envelope (written by
         :meth:`convert_sdk.context.Context.set_attributes` /
-        :meth:`convert_sdk.context.Context.set_segments`) through the single
-        per-Core ``DataStore`` and returns ``(attributes, default_segments)``.
+        :meth:`convert_sdk.context.Context.set_segments` /
+        :meth:`convert_sdk.context.Context._persist_visitor_state`) through the
+        single per-Core ``DataStore`` and returns
+        ``(attributes, default_segments, bucketing)``.
 
         The persisted value is the structured envelope
-        ``{"attributes": {...}, "segments": {...}}`` (Story 3.3). For backward
-        compatibility a legacy Story 3.2 plain-attributes ``dict`` (no envelope)
-        is treated as attributes-only with empty segments. Caller-supplied
-        ``visitor_attributes`` for this fresh context overlay the persisted
-        attributes (explicit construction wins). The read is strictly
-        visitor-scoped and goes through the ``DataStore`` protocol only — Core
-        (L4) owns the concrete store; downstream sees the protocol. Returns the
-        caller value unchanged (and no segments) when nothing is persisted, so
-        contexts for visitors that never persisted state behave exactly as
-        before.
+        ``{"attributes": {...}, "segments": {...}, "bucketing": {...}}``
+        (qs-03 PY-1). For backward compatibility:
+
+        * a legacy Story 3.3 2-key envelope ``{"attributes": ..., "segments":
+          ...}`` (no ``"bucketing"`` key) hydrates with an EMPTY bucketing map;
+        * a legacy Story 3.2 plain-attributes ``dict`` (no envelope at all) is
+          treated as attributes-only, with empty segments AND empty bucketing.
+
+        Caller-supplied ``visitor_attributes`` for this fresh context overlay
+        the persisted attributes (explicit construction wins). The read is
+        strictly visitor-scoped and goes through the ``DataStore`` protocol
+        only — Core (L4) owns the concrete store; downstream sees the
+        protocol. Returns the caller value unchanged (and no segments/
+        bucketing) when nothing is persisted, so contexts for visitors that
+        never persisted state behave exactly as before.
         """
         stored = self._data_store.get(visitor_state_key(visitor_id))
         stored_attributes: Mapping[str, Any] = {}
         stored_segments: Optional[Mapping[str, Any]] = None
+        stored_bucketing: Optional[Mapping[str, str]] = None
         if isinstance(stored, Mapping) and stored:
             if "attributes" in stored or "segments" in stored:
-                # Story 3.3 structured envelope.
+                # Story 3.3 structured envelope (2-key, or 3-key as of qs-03).
                 raw_attrs = stored.get("attributes")
                 stored_attributes = raw_attrs if isinstance(raw_attrs, Mapping) else {}
                 raw_segments = stored.get("segments")
                 if isinstance(raw_segments, Mapping) and raw_segments:
                     stored_segments = dict(raw_segments)
+                raw_bucketing = stored.get("bucketing")
+                if isinstance(raw_bucketing, Mapping) and raw_bucketing:
+                    stored_bucketing = {str(k): str(v) for k, v in raw_bucketing.items()}
             else:
                 # Legacy Story 3.2 plain-attributes dict (attributes-only).
                 stored_attributes = stored
@@ -283,7 +299,7 @@ class Core:
             if visitor_attributes:
                 merged.update(visitor_attributes)
             attributes = merged
-        return attributes, stored_segments
+        return attributes, stored_segments, stored_bucketing
 
     # --- tracking flush ----------------------------------------------------
 
