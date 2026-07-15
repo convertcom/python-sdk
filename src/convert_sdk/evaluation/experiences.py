@@ -151,12 +151,23 @@ def select_experience(
     visitor_id: str,
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     location_attributes: Optional[Mapping[str, Any]] = None,
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> Optional[ExperienceResult]:
     """Select a variation for ``visitor_id`` in the experience ``experience_key``.
 
     Returns a typed :class:`ExperienceResult` for a qualified visitor that
     buckets into an active variation, or ``None`` for any normal miss (missing
     experience, unqualified visitor, no active variation, or no bucket).
+
+    ``sticky_bucketing`` is an optional ``{experience_id: variation_id}``
+    read-back map (qs-03 sticky-bucketing persistence). When it holds a
+    variation id for the resolved experience that still resolves against the
+    current config, that stored decision is returned verbatim and the
+    bucketing hash is skipped entirely (AC2). When it is absent, ``None``, or
+    holds an unresolvable variation id, evaluation falls through to the
+    existing fresh-hash path unchanged (AC4/AC9). Qualification is always
+    checked first, so a stored decision can never resurrect a result for a
+    visitor who no longer qualifies (AC8).
     """
     if not visitor_id:
         return None
@@ -176,6 +187,15 @@ def select_experience(
     experience_id = experience.get("id")
     if not experience_id:
         return None
+
+    if sticky_bucketing is not None:
+        stored_variation_id = sticky_bucketing.get(str(experience_id))
+        if stored_variation_id is not None:
+            stored_variation = _find_variation(experience, stored_variation_id)
+            if stored_variation is not None:
+                return _build_experience_result(
+                    experience, experience_key, experience_id, stored_variation
+                )
 
     bucket_value = get_bucket_value_for_visitor(
         visitor_id, experience_id=str(experience_id)
@@ -198,10 +218,22 @@ def select_experience(
     if variation is None:
         return None
 
+    return _build_experience_result(experience, experience_key, experience_id, variation)
+
+
+def _build_experience_result(
+    experience: Mapping[str, Any],
+    experience_key: str,
+    experience_id: Any,
+    variation: Mapping[str, Any],
+) -> ExperienceResult:
+    """Build the shared :class:`ExperienceResult` shape used by both the
+    fresh-hash path and the sticky-bucketing read-back path (qs-03 PY-2).
+    """
     return ExperienceResult(
         experience_key=str(experience.get("key", experience_key)),
         experience_id=str(experience_id),
-        variation_id=str(variation_id),
+        variation_id=str(variation.get("id")),
         variation_key=(
             str(variation.get("key")) if variation.get("key") is not None else None
         ),
