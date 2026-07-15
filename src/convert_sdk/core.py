@@ -245,7 +245,7 @@ class Core:
         visitor_id: str,
         visitor_attributes: Optional[Mapping[str, Any]],
     ) -> tuple[
-        Optional[Mapping[str, Any]], Optional[Mapping[str, Any]], Optional[Mapping[str, Any]]
+        Optional[Mapping[str, Any]], Optional[Mapping[str, Any]], Optional[Mapping[str, str]]
     ]:
         """Rehydrate persisted visitor attributes, default segments, AND bucketing.
 
@@ -276,7 +276,7 @@ class Core:
         stored = self._data_store.get(visitor_state_key(visitor_id))
         stored_attributes: Mapping[str, Any] = {}
         stored_segments: Optional[Mapping[str, Any]] = None
-        stored_bucketing: Optional[Mapping[str, Any]] = None
+        stored_bucketing: Optional[Mapping[str, str]] = None
         if isinstance(stored, Mapping) and stored:
             if "attributes" in stored or "segments" in stored:
                 # Story 3.3 structured envelope (2-key, or 3-key as of qs-03).
@@ -287,7 +287,7 @@ class Core:
                     stored_segments = dict(raw_segments)
                 raw_bucketing = stored.get("bucketing")
                 if isinstance(raw_bucketing, Mapping) and raw_bucketing:
-                    stored_bucketing = dict(raw_bucketing)
+                    stored_bucketing = {str(k): str(v) for k, v in raw_bucketing.items()}
             else:
                 # Legacy Story 3.2 plain-attributes dict (attributes-only).
                 stored_attributes = stored

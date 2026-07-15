@@ -112,7 +112,7 @@ class Context:
         *,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         default_segments: Optional[Mapping[str, Any]] = None,
-        bucketing: Optional[Mapping[str, Any]] = None,
+        bucketing: Optional[Mapping[str, str]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         tracker: Optional["Tracker"] = None,
         data_store: Optional["DataStore"] = None,

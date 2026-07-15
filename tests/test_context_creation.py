@@ -712,3 +712,21 @@ def test_legacy_envelopes_hydrate_with_empty_bucketing_no_error(
     assert dict(ctx._state.bucketing) == {}
     assert dict(ctx.visitor_attributes) == expected_attributes
     assert dict(ctx.default_segments) == expected_segments
+
+
+def test_hydrate_coerces_non_string_bucketing_keys_and_values_to_str():
+    # Defensive coercion (Gemini PR #54 review, fix #4): a persisted 3-key
+    # envelope whose bucketing map holds non-string keys/values (e.g. written
+    # by an out-of-band process, or a pre-str-typed persisted map) hydrates
+    # into a Mapping[str, str] via str(...) coercion — never raises, and never
+    # leaks the original int types into ContextState.bucketing.
+    from convert_sdk.ports.storage import visitor_state_key
+
+    store = _RecordingStore()
+    store.set(
+        visitor_state_key("v_coerce"),
+        {"attributes": {}, "segments": {}, "bucketing": {100111: 100901}},
+    )
+    core = _store_core(store)
+    ctx = core.create_context("v_coerce")
+    assert dict(ctx._state.bucketing) == {"100111": "100901"}
