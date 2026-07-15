@@ -181,6 +181,7 @@ def select_experience(
         snapshot,
         visitor_attributes=visitor_attributes,
         location_attributes=location_attributes,
+        sticky_bucketing=sticky_bucketing,
     ):
         return None
 

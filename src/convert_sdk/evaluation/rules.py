@@ -25,15 +25,15 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from convert_sdk.logging import log_mutual_exclusion_target_not_found
+
 #: qs-04 mutual-exclusion audience rule type (`bucketed_into_experience_key`).
 #: Public (not underscore-prefixed) because it is a cross-module contract
-#: value: this module (``rules.py``) owns the constant, but the dispatch site
-#: that consumes it lives in a different ``evaluation/`` module added by a
-#: later task (PY-3) — the same public-constant convention used by
-#: ``evaluation/bucketing.py``'s ``DEFAULT_HASH_SEED`` / ``DEFAULT_MAX_TRAFFIC``
-#: for values shared across module boundaries. **Currently inert/unused**:
-#: PY-1 only adds the constant; no dispatch on it exists yet (that lands in
-#: PY-3, see ``qs-04-mutual-exclusion-rule.md``).
+#: value: this module (``rules.py``) owns the constant, and (as of PY-3) also
+#: owns the dispatch on it — see :func:`_resolve_bucketed_into_experience_key`
+#: and :func:`_resolve_audience` below — the same public-constant convention
+#: used by ``evaluation/bucketing.py``'s ``DEFAULT_HASH_SEED`` /
+#: ``DEFAULT_MAX_TRAFFIC`` for values shared across module boundaries.
 RULE_TYPE_BUCKETED_INTO_EXPERIENCE_KEY = "bucketed_into_experience_key"
 
 # ---------------------------------------------------------------------------
@@ -264,20 +264,150 @@ def is_rule_matched(
 # ---------------------------------------------------------------------------
 
 
+def _sole_rule_item(rules: Optional[Mapping[str, Any]]) -> Optional[Mapping[str, Any]]:
+    """Return the single rule item at the bottom of ``rules``'s
+    ``OR[AND[OR_WHEN[...]]]`` tree when it is the SOLE item in that tree
+    (exactly one ``OR`` branch, one ``AND`` block, one ``OR_WHEN`` item) — else
+    ``None`` for any other (empty, malformed, or mixed multi-item) tree.
+
+    Used to detect a "sole-exclusion-rule-per-audience-tree" audience (qs-04):
+    an audience whose entire rule tree is exactly one rule element (in
+    practice, a ``bucketed_into_experience_key`` exclusion). A mixed tree
+    (more than one ``OR``/``AND``/``OR_WHEN`` entry) is NOT sole and falls
+    through to the generic :func:`is_rule_matched` walk unchanged — no served
+    config mixes the exclusion rule into a generic audience's tree (backend
+    registration is a separate spec), so this is a conservative fail-closed
+    detection, never a guess.
+    """
+    if not isinstance(rules, Mapping):
+        return None
+    or_branches: Sequence[Mapping[str, Any]] = rules.get("OR") or []
+    if len(or_branches) != 1:
+        return None
+    and_blocks: Sequence[Mapping[str, Any]] = or_branches[0].get("AND") or []
+    if len(and_blocks) != 1:
+        return None
+    or_when_items: Sequence[Mapping[str, Any]] = and_blocks[0].get("OR_WHEN") or []
+    if len(or_when_items) != 1:
+        return None
+    return or_when_items[0]
+
+
+def _resolve_bucketed_into_experience_key(
+    rule: Mapping[str, Any],
+    snapshot: Any,
+    sticky_bucketing: Optional[Mapping[str, str]],
+) -> bool:
+    """Resolve a SOLE ``bucketed_into_experience_key`` audience rule (qs-04),
+    read-only, against the visitor's stored bucketing decisions.
+
+    Mirrors the spec's resolution algorithm
+    (``qs-04-mutual-exclusion-rule.md``):
+
+    * ``target = snapshot.get_experience_by_key(rule["value"])``
+    * ``bucketed_raw = target is not None AND str(target["id"]) in
+      sticky_bucketing`` — never the bucketing hash, never a write.
+    * ``matched = (not bucketed_raw) if negated else bucketed_raw``
+      (negation applied LAST, after ``bucketed_raw`` is resolved).
+
+    An unresolvable target key logs a WARNING naming it
+    (:func:`~convert_sdk.logging.log_mutual_exclusion_target_not_found`,
+    AC8) and ``bucketed_raw`` stays ``False`` — with ``negated: true`` the
+    exclusion dissolves (mirrors web semantics for an archived/unknown
+    target).
+    """
+    matching = rule.get("matching") or {}
+    negated = bool(matching.get("negated", False))
+    target_key = rule.get("value")
+    target = snapshot.get_experience_by_key(target_key)
+
+    bucketed_raw = False
+    if target is None:
+        log_mutual_exclusion_target_not_found(target_key=str(target_key))
+    else:
+        target_id = target.get("id")
+        bucketed_raw = bool(
+            target_id is not None
+            and sticky_bucketing is not None
+            and str(target_id) in sticky_bucketing
+        )
+
+    return (not bucketed_raw) if negated else bucketed_raw
+
+
+def _resolve_audience(
+    audience: Mapping[str, Any],
+    snapshot: Any,
+    visitor_attributes: Mapping[str, Any],
+    sticky_bucketing: Optional[Mapping[str, str]],
+) -> bool:
+    """Resolve a single referenced audience.
+
+    A generic audience is matched against ``visitor_attributes`` via the
+    unchanged :func:`is_rule_matched` walk. A *sole-exclusion* audience (its
+    entire rule tree is one ``bucketed_into_experience_key`` item, per
+    :func:`_sole_rule_item`) is instead resolved read-only against
+    ``sticky_bucketing`` via :func:`_resolve_bucketed_into_experience_key` —
+    ``visitor_attributes`` is never consulted for that audience (AC7
+    structural data-isolation guard).
+    """
+    rules = audience.get("rules")
+    if not rules:
+        return False
+    sole_item = _sole_rule_item(rules)
+    if (
+        sole_item is not None
+        and sole_item.get("rule_type") == RULE_TYPE_BUCKETED_INTO_EXPERIENCE_KEY
+    ):
+        return _resolve_bucketed_into_experience_key(sole_item, snapshot, sticky_bucketing)
+    return is_rule_matched(visitor_attributes, rules)
+
+
 def _matches_any_audience(
     audience_ids: Sequence[str],
     snapshot: Any,
     visitor_attributes: Mapping[str, Any],
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> bool:
-    """At least one referenced audience must match the visitor attributes."""
+    """At least one referenced audience must match (``matching_options.audiences
+    != "all"`` — today's sole policy, and the default when absent/unset,
+    AC7)."""
     for audience_id in audience_ids:
         audience = snapshot.get_audience_by_id(str(audience_id))
         if audience is None:
             continue
-        rules = audience.get("rules")
-        if rules and is_rule_matched(visitor_attributes, rules):
+        if _resolve_audience(audience, snapshot, visitor_attributes, sticky_bucketing):
             return True
     return False
+
+
+def _matches_all_audiences(
+    audience_ids: Sequence[str],
+    snapshot: Any,
+    visitor_attributes: Mapping[str, Any],
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """Every referenced (resolvable) audience must match
+    (``matching_options.audiences == "all"``, qs-04 AC6).
+
+    Mirrors ``php-sdk/packages/Data/src/DataManager.php:456``:
+    ``count(matched) === count(toCheck)``, where ``toCheck`` is the subset of
+    ``audience_ids`` that resolve to a real audience in ``snapshot`` — an
+    audience id with no matching audience is skipped from both counts (as
+    :func:`_matches_any_audience` already does), so referencing zero
+    resolvable audiences is vacuously "all matched" (``0 == 0``), mirroring
+    the PHP oracle's "not restricted" fallback for that edge.
+    """
+    to_check = 0
+    matched = 0
+    for audience_id in audience_ids:
+        audience = snapshot.get_audience_by_id(str(audience_id))
+        if audience is None:
+            continue
+        to_check += 1
+        if _resolve_audience(audience, snapshot, visitor_attributes, sticky_bucketing):
+            matched += 1
+    return matched == to_check
 
 
 def qualifies(
@@ -286,6 +416,7 @@ def qualifies(
     *,
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     location_attributes: Optional[Mapping[str, Any]] = None,
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> bool:
     """Return whether a visitor qualifies for ``experience`` against ``snapshot``.
 
@@ -293,9 +424,21 @@ def qualifies(
 
     * Location: if the experience has a ``site_area`` rule set, it must match the
       ``location_attributes``; an absent/empty ``site_area`` is unrestricted.
-    * Audience: if the experience references audiences, at least one referenced
-      audience's rules must match the ``visitor_attributes``; an absent/empty
-      audiences list is unrestricted.
+    * Audience: if the experience references audiences, ``experience.settings.
+      matching_options.audiences`` picks the combination policy — ``"all"``
+      requires every referenced (resolvable) audience to match; anything else
+      (``"any"``, absent, or no ``settings`` at all) requires at least one
+      referenced audience to match (today's exact, pre-qs-04 policy — the
+      mandatory zero-regression default, AC7). An absent/empty audiences list
+      is unrestricted.
+
+    ``sticky_bucketing`` is the optional visitor bucketing-decision map (qs-03)
+    threaded through ONLY to the audience-level resolution helpers above —
+    never merged into ``visitor_attributes`` — so a ``bucketed_into_
+    experience_key`` sole-exclusion audience (qs-04) can resolve against
+    stored bucketing state while every generic audience/location rule keeps
+    reading exclusively from the caller-scoped attribute dicts (AC7
+    structural guard).
 
     Missing attribute dicts are treated as empty (no restriction can be
     satisfied for a restricted experience, so a restricted experience without
@@ -312,9 +455,19 @@ def qualifies(
     # Audience qualification. Kept as an explicit guard clause (parallel to the
     # site_area guard above) rather than a compound negated return for clarity.
     audience_ids = experience.get("audiences") or []
-    if audience_ids and not _matches_any_audience(  # noqa: SIM103
-        audience_ids, snapshot, visitor_attributes
-    ):
-        return False
+    if audience_ids:
+        settings = experience.get("settings") or {}
+        matching_options = settings.get("matching_options") or {}
+        combination = matching_options.get("audiences")
+        if combination == "all":
+            audiences_matched = _matches_all_audiences(
+                audience_ids, snapshot, visitor_attributes, sticky_bucketing
+            )
+        else:
+            audiences_matched = _matches_any_audience(
+                audience_ids, snapshot, visitor_attributes, sticky_bucketing
+            )
+        if not audiences_matched:
+            return False
 
     return True
