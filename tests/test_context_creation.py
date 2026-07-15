@@ -580,3 +580,135 @@ def test_default_segments_property_is_read_only_view():
     ctx.set_segments({"browser": "chrome"})
     with pytest.raises(TypeError):
         ctx.default_segments["browser"] = "firefox"  # type: ignore[index]
+
+
+# --- qs-03 PY-1: bucketing substrate (envelope shape + hydration round-trip) -
+#
+# This task adds ONLY the persistence substrate for the sticky-bucketing
+# decision map: the ``ContextState.bucketing`` field, the 3-key
+# ``{"attributes","segments","bucketing"}`` envelope written by
+# ``_persist_visitor_state``, and the widened ``_hydrate_visitor_state``
+# round-trip (AC1 shape + AC10 hydration/backward-compat). It does NOT wire
+# sticky read-back/write-after-hash into ``run_experience`` (PY-3) and does not
+# add ``enable_storage`` (PY-2/PY-3) — decisions are set directly on
+# ``ctx._state`` here to isolate the substrate from the not-yet-built
+# evaluation seam.
+
+
+def test_manual_bucketing_decision_persists_3key_envelope_in_memory_and_store():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a", visitor_attributes={"country": "US"})
+    ctx._state = ctx._state.with_bucketing({"100111": "100901"})
+    ctx._persist_visitor_state()
+
+    # In-memory ContextState carries the decision immediately (rebind).
+    assert dict(ctx._state.bucketing) == {"100111": "100901"}
+
+    # The DataStore holds the full 3-key envelope under the visitor-scoped key.
+    state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    assert len(state_keys) == 1
+    persisted = store.get(state_keys[0])
+    assert persisted == {
+        "attributes": {"country": "US"},
+        "segments": {},
+        "bucketing": {"100111": "100901"},
+    }
+
+
+def test_persist_visitor_state_bucketing_is_visitor_scoped():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx_a = core.create_context("v_a")
+    ctx_b = core.create_context("v_b")
+    ctx_a._state = ctx_a._state.with_bucketing({"100111": "100901"})
+    ctx_a._persist_visitor_state()
+
+    # ctx_b's in-memory bucketing state is unaffected, and no key was written
+    # for v_b.
+    assert dict(ctx_b._state.bucketing) == {}
+    b_keys = [k for k in store._d if k.startswith("state:") and "v_b" in k]
+    assert b_keys == []
+
+
+def test_persist_visitor_state_bucketing_noop_under_preview():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a")
+    ctx._state = ctx._state.with_bucketing({"100111": "100901"})
+    # Activate preview on THIS context (e2/v3 resolve locally from CONFIG).
+    ctx.set_preview("e2", "v3")
+    ctx._persist_visitor_state()
+
+    # No DataStore write happens once a preview is active (same gate as
+    # attributes/segments — context.py:346).
+    state_keys = [k for k in store._d if k.startswith("state:") and "v_a" in k]
+    assert state_keys == []
+
+
+def test_persist_visitor_state_bucketing_noop_without_data_store():
+    core = Core(SDKConfig(data=CONFIG)).initialize()
+    ctx = Context("v_a", core.current_config)  # no injected DataStore
+    ctx._state = ctx._state.with_bucketing({"100111": "100901"})
+    # Must not raise; persistence is simply skipped. The in-memory rebind
+    # performed by the caller before this call is untouched.
+    ctx._persist_visitor_state()
+    assert dict(ctx._state.bucketing) == {"100111": "100901"}
+
+
+def test_hydrate_persisted_3key_envelope_round_trips_bucketing():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_a", visitor_attributes={"country": "US"})
+    ctx.set_segments({"browser": "chrome"})
+    ctx._state = ctx._state.with_bucketing({"100111": "100901"})
+    ctx._persist_visitor_state()
+
+    # A freshly created context for the SAME visitor rehydrates the bucketing
+    # map alongside attributes/segments through the same DataStore + key.
+    ctx2 = core.create_context("v_a")
+    assert dict(ctx2._state.bucketing) == {"100111": "100901"}
+    assert dict(ctx2.visitor_attributes) == {"country": "US"}
+    assert dict(ctx2.default_segments) == {"browser": "chrome"}
+
+
+def test_no_persisted_state_hydrates_empty_bucketing():
+    store = _RecordingStore()
+    core = _store_core(store)
+    ctx = core.create_context("v_fresh")
+    assert dict(ctx._state.bucketing) == {}
+
+
+@pytest.mark.parametrize(
+    "stored_value, expected_attributes, expected_segments",
+    [
+        pytest.param(
+            {"attributes": {"country": "US"}, "segments": {"browser": "chrome"}},
+            {"country": "US"},
+            {"browser": "chrome"},
+            id="legacy-2key-envelope",
+        ),
+        pytest.param(
+            {"country": "US"},
+            {"country": "US"},
+            {},
+            id="legacy-plain-attributes-dict",
+        ),
+    ],
+)
+def test_legacy_envelopes_hydrate_with_empty_bucketing_no_error(
+    stored_value, expected_attributes, expected_segments
+):
+    # Backward compatibility (AC10): a pre-qs-03 persisted envelope (either the
+    # Story 3.3 2-key {"attributes","segments"} shape or the Story 3.2 legacy
+    # plain-attributes dict) hydrates with an EMPTY bucketing map — no error —
+    # while attributes/segments still round-trip exactly as before.
+    from convert_sdk.ports.storage import visitor_state_key
+
+    store = _RecordingStore()
+    store.set(visitor_state_key("v_legacy"), stored_value)
+    core = _store_core(store)
+    ctx = core.create_context("v_legacy")
+    assert dict(ctx._state.bucketing) == {}
+    assert dict(ctx.visitor_attributes) == expected_attributes
+    assert dict(ctx.default_segments) == expected_segments
