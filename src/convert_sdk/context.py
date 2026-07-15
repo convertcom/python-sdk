@@ -112,6 +112,7 @@ class Context:
         *,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         default_segments: Optional[Mapping[str, Any]] = None,
+        bucketing: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         tracker: Optional["Tracker"] = None,
         data_store: Optional["DataStore"] = None,
@@ -129,6 +130,7 @@ class Context:
             snapshot=snapshot,
             visitor_attributes=visitor_attributes or {},
             default_segments=default_segments or {},
+            bucketing=bucketing or {},
         )
         self._snapshot = snapshot
         # Story 2.3: shared tracking orchestrator (dedup + queue). When None,
@@ -336,12 +338,12 @@ class Context:
         ``Context`` sharing the same ``DataStore`` persists normally (AC6).
 
         The persisted value is a structured envelope
-        ``{"attributes": {...}, "segments": {...}}`` so a later
-        ``create_context(visitor_id)`` round-trips BOTH the visitor attributes
-        (Story 3.2) and the default segments (Story 3.3) through the same store
-        and hydrate route. The ``DataStore`` four-method surface is unchanged —
-        a plain ``set`` of serialized state; no business logic lives in the
-        store.
+        ``{"attributes": {...}, "segments": {...}, "bucketing": {...}}`` so a
+        later ``create_context(visitor_id)`` round-trips the visitor attributes
+        (Story 3.2), the default segments (Story 3.3), and the sticky-bucketing
+        decision map (qs-03 PY-1) through the same store and hydrate route. The
+        ``DataStore`` four-method surface is unchanged — a plain ``set`` of
+        serialized state; no business logic lives in the store.
         """
         if self._data_store is None or self._preview is not None:
             return None
@@ -351,6 +353,7 @@ class Context:
             {
                 "attributes": dict(self._state.visitor_attributes),
                 "segments": dict(self._state.default_segments),
+                "bucketing": dict(self._state.bucketing),
             },
         )
         return None
