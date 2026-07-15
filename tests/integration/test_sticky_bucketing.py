@@ -34,9 +34,13 @@ the public ``Context`` surface:
   who no longer qualifies for the experience's audience (qualification gates
   ahead of the sticky read).
 
-Rows 4 (unresolvable stored variation falls through to a fresh hash) and 7
-(cross-request stickiness via a NEW Core/Context sharing the SAME DataStore
-and an UNCHANGED config) are explicitly OUT of scope here -- PY-4's job.
+Row 4 (unresolvable stored variation falls through to a fresh hash) is
+exercised above by ``test_ac4_unresolvable_stored_vid_falls_through_and_updates_map``.
+Row 7 -- AC7 cross-request/cross-``Core`` durability via a shared
+``DataStore``, plus the negative control proving an unshared store is NOT
+sticky -- is exercised below by
+``test_ac7_shared_store_across_cores_is_sticky_no_rehash`` and
+``test_ac7_unshared_stores_across_cores_are_not_sticky`` (PY-4).
 
 All of these tests currently FAIL: ``run_experience``/``run_experiences`` do
 not yet accept ``enable_storage``, and nothing is persisted after a bucketing
@@ -441,3 +445,70 @@ def test_ac4_unresolvable_stored_vid_falls_through_and_updates_map(monkeypatch) 
     assert len(own_calls) >= 1
     _, persisted, _ = own_calls[-1]
     assert persisted["bucketing"][EXP_A_ID] == result.variation_id
+
+
+# --- AC7 (row7): cross-Core durability via a shared DataStore ---------------
+#
+# There is no in-place "swap this Core's transport/store" seam, so AC7 is
+# exercised the same way AC3 already simulates cross-request durability: a
+# SECOND, wholly separate ``Core``/``Context`` for the SAME visitor id. AC3
+# holds the config fixed and reallocates traffic; AC7 holds the config fixed
+# and instead varies whether the two ``Core``s are given the SAME injected
+# ``DataStore`` instance (positive) or two independent ones (negative
+# control) -- proving stickiness is a property of the shared store, not of
+# reusing a single ``Core``/``Context``.
+
+
+def test_ac7_shared_store_across_cores_is_sticky_no_rehash(monkeypatch) -> None:
+    store = _SpyDataStore()
+    core_a = _core(store)
+    ctx_a = core_a.create_context("v-ac7")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+
+    # A SECOND, separate Core -- built from the SAME shared DataStore instance
+    # and the SAME unchanged config -- rehydrates the stored decision on
+    # create_context (Core._hydrate_visitor_state, PY-1).
+    core_b = _core(store)
+    ctx_b = core_b.create_context("v-ac7")
+    assert dict(ctx_b._state.bucketing) == {EXP_A_ID: captured}
+
+    spy = _HashCallSpy()
+    monkeypatch.setattr(
+        "convert_sdk.evaluation.experiences.get_bucket_value_for_visitor", spy
+    )
+
+    second = ctx_b.run_experience(EXP_A_KEY)
+
+    assert second is not None
+    assert second.variation_id == captured
+    assert spy.calls == 0
+
+
+def test_ac7_unshared_stores_across_cores_are_not_sticky(monkeypatch) -> None:
+    store_a = _SpyDataStore()
+    store_b = _SpyDataStore()
+    core_a = _core(store_a)
+    ctx_a = core_a.create_context("v-ac7-neg")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+
+    # A SECOND, separate Core with its OWN, independent DataStore -- same
+    # visitor id, same unchanged config -- has nothing to rehydrate: no
+    # cross-request durability without a SHARED store.
+    core_b = _core(store_b)
+    ctx_b = core_b.create_context("v-ac7-neg")
+    assert dict(ctx_b._state.bucketing) == {}
+
+    spy = _HashCallSpy()
+    monkeypatch.setattr(
+        "convert_sdk.evaluation.experiences.get_bucket_value_for_visitor", spy
+    )
+
+    second = ctx_b.run_experience(EXP_A_KEY)
+
+    assert second is not None
+    assert spy.calls == 1
