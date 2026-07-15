@@ -49,9 +49,12 @@ decision today (PY-1/PY-2 are substrate only).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from convert_sdk import Core, InMemoryDataStore, SDKConfig
+from convert_sdk.config_loader import load_snapshot
+from convert_sdk.context import Context
+from convert_sdk.domain.results import ConversionStatus
 from convert_sdk.evaluation.bucketing import get_bucket_value_for_visitor, select_bucket
 from convert_sdk.ports.storage import visitor_state_key
 
@@ -71,6 +74,25 @@ VAR_A2 = "100903"
 EXP_B_ID = "100222"
 EXP_B_KEY = "exp-b"
 VAR_B1 = "100902"
+
+# AC11 (conversion attribution) needs a resolvable goal on the shared config.
+GOAL_ID = "500444"
+GOAL_KEY = "purchase_completed"
+
+# AC12/AC13 (feature resolution / diagnostics sticky) need a fullStackFeature
+# change whose variable VALUE differs per exp-a variation, so "resolved from
+# the sticky variation" is observably distinguishable from "resolved from a
+# fresh-hash variation" -- not just a resolved/not-resolved signal.
+FEATURE_ID = "300333"
+FEATURE_KEY = "banner-feature"
+FEATURE_VAR_KEY = "headline"
+FEATURE_VALUE_A1 = "control-headline"
+FEATURE_VALUE_A2 = "treatment-headline"
+
+# exp-a variation id -> its human-readable `key` / its feature headline value,
+# shared by the AC11/12/13 tests so neither has to re-derive the mapping.
+_VARIATION_KEYS = {VAR_A1: "control", VAR_A2: "treatment"}
+_FEATURE_VALUES = {VAR_A1: FEATURE_VALUE_A1, VAR_A2: FEATURE_VALUE_A2}
 
 _VIP_AUDIENCE_ID = "aud-vip"
 _VIP_AUDIENCE = {
@@ -105,13 +127,32 @@ def _variation(
     *,
     traffic_allocation: float = 50.0,
     status: str = "running",
+    feature_value: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Build a single variation, optionally carrying a ``fullStackFeature``
+    change for ``FEATURE_ID`` (AC12/AC13). ``feature_value`` is ``None`` for
+    every pre-existing call site (AC1-AC10), so those variations still get an
+    empty ``changes`` list, unchanged in effect from the previous ``{}``
+    literal (``features.py`` treats both as falsy).
+    """
+    changes: List[Dict[str, Any]] = []
+    if feature_value is not None:
+        changes.append(
+            {
+                "id": f"fsf-{variation_id}",
+                "type": "fullStackFeature",
+                "data": {
+                    "feature_id": FEATURE_ID,
+                    "variables_data": {FEATURE_VAR_KEY: feature_value},
+                },
+            }
+        )
     return {
         "id": variation_id,
         "key": key,
         "status": status,
         "traffic_allocation": traffic_allocation,
-        "changes": {},
+        "changes": changes,
     }
 
 
@@ -119,22 +160,56 @@ def _build_config(
     *,
     exp_a_traffic: Tuple[float, float] = (50.0, 50.0),
     gate_exp_a_audience: bool = False,
+    include_feature: bool = False,
+    feature_variation_ids: Optional[FrozenSet[str]] = None,
 ) -> Dict[str, Any]:
     """Build the shared exp-a/exp-b fixture config.
 
-    ``exp_a_traffic`` lets AC3 reallocate exp-a's split (e.g. to zero out the
-    already-captured variation) without duplicating the whole config literal.
-    ``gate_exp_a_audience`` attaches the VIP-only audience to exp-a for AC8,
-    otherwise exp-a has no audience gate (every other row needs a visitor who
-    qualifies unconditionally).
+    ``exp_a_traffic`` lets AC3 (and the AC11/12/13 reallocation helper)
+    reallocate exp-a's split (e.g. to zero out the already-captured variation)
+    without duplicating the whole config literal. ``gate_exp_a_audience``
+    attaches the VIP-only audience to exp-a for AC8, otherwise exp-a has no
+    audience gate (every other row needs a visitor who qualifies
+    unconditionally).
+
+    ``include_feature`` (AC12/AC13) declares ``FEATURE_KEY`` and attaches its
+    ``fullStackFeature`` change to exp-a's variations named in
+    ``feature_variation_ids`` (default: BOTH ``VAR_A1``/``VAR_A2``, each with
+    a DIFFERENT ``headline`` value, so a resolved feature's variable value
+    itself proves which variation served it). Passing a narrower
+    ``feature_variation_ids`` (e.g. just the sticky/captured variation) lets a
+    test observe a resolved/not-resolved signal instead of a value diff --
+    used by the diagnose_feature consistency check, where the typed
+    diagnostic does not expose the resolved variation's variables.
     """
+    feature_targets: FrozenSet[str] = (
+        feature_variation_ids
+        if feature_variation_ids is not None
+        else frozenset({VAR_A1, VAR_A2})
+    )
+
+    def _feature_value_for(variation_id: str) -> Optional[str]:
+        if not include_feature or variation_id not in feature_targets:
+            return None
+        return _FEATURE_VALUES[variation_id]
+
     exp_a: Dict[str, Any] = {
         "id": EXP_A_ID,
         "key": EXP_A_KEY,
         "status": "running",
         "variations": [
-            _variation(VAR_A1, "control", traffic_allocation=exp_a_traffic[0]),
-            _variation(VAR_A2, "treatment", traffic_allocation=exp_a_traffic[1]),
+            _variation(
+                VAR_A1,
+                "control",
+                traffic_allocation=exp_a_traffic[0],
+                feature_value=_feature_value_for(VAR_A1),
+            ),
+            _variation(
+                VAR_A2,
+                "treatment",
+                traffic_allocation=exp_a_traffic[1],
+                feature_value=_feature_value_for(VAR_A2),
+            ),
         ],
     }
     if gate_exp_a_audience:
@@ -147,15 +222,41 @@ def _build_config(
         "variations": [_variation(VAR_B1, "only", traffic_allocation=100.0)],
     }
 
+    features = (
+        [
+            {
+                "id": FEATURE_ID,
+                "key": FEATURE_KEY,
+                "variables": [{"key": FEATURE_VAR_KEY, "type": "string"}],
+            }
+        ]
+        if include_feature
+        else []
+    )
+
     return {
         "account_id": "100123",
         "project": {"id": "200456"},
         "experiences": [exp_a, exp_b],
-        "features": [],
-        "goals": [],
+        "features": features,
+        "goals": [{"id": GOAL_ID, "key": GOAL_KEY}],
         "audiences": [_VIP_AUDIENCE] if gate_exp_a_audience else [],
         "segments": [],
     }
+
+
+def _reallocate_away_from(captured: str, **config_kwargs: Any) -> Dict[str, Any]:
+    """Build a config where a FRESH hash for exp-a would pick the variation
+    OTHER than ``captured`` (the already-stored sticky decision), by zeroing
+    out ``captured``'s traffic split -- the same reallocation shape
+    ``test_ac3_stored_decision_survives_traffic_reallocation`` pins inline,
+    shared here so AC11/AC12/AC13 do not each repeat the same conditional
+    (SonarQube new-code-duplication discipline). Extra ``config_kwargs`` (e.g.
+    ``include_feature``, ``feature_variation_ids``) are forwarded to
+    :func:`_build_config` unchanged.
+    """
+    exp_a_traffic = (0.0, 100.0) if captured == VAR_A1 else (100.0, 0.0)
+    return _build_config(exp_a_traffic=exp_a_traffic, **config_kwargs)
 
 
 class _SpyDataStore(InMemoryDataStore):
@@ -512,3 +613,235 @@ def test_ac7_unshared_stores_across_cores_are_not_sticky(monkeypatch) -> None:
 
     assert second is not None
     assert spy.calls == 1
+
+
+# --- AC11/AC12/AC13 (PY-5): the sticky read is a SHARED chokepoint ----------
+#
+# The qs-03 contract (spec section "The sticky read is a shared chokepoint
+# (JS parity)", AC11/AC12/AC13) requires every variation-resolution path --
+# not just `run_experience` -- to honor an already-stored bucketing decision:
+# conversion attribution, feature resolution, and diagnostics. Today (PY-1..
+# PY-4) only `run_experience`/`run_experiences` consult
+# `self._state.bucketing`; `resolve_feature`/`resolve_features`
+# (evaluation/features.py), `_compute_bucketing_assignments`/
+# `create_conversion` (tracking/conversions.py), `Tracker.track`
+# (tracking/tracker.py), and `diagnose_experience`/`diagnose_feature`
+# (context.py) all call `select_experience` with NO `sticky_bucketing`
+# argument, so each re-hashes fresh. All tests below build the SAME
+# "reallocate away from the already-captured variation" setup AC3/AC7 already
+# use (a SECOND Core/Context sharing the visitor id, from a config where a
+# fresh hash would flip to the OTHER exp-a variation) and therefore currently
+# FAIL: the sibling paths return the fresh-hash variation's outcome instead of
+# the sticky one `run_experience` already served and persisted.
+
+
+def test_ac11_conversion_attribution_sticky_after_reallocation_tracker_path() -> None:
+    """AC11, tracker-backed path (``Core``-constructed context, PY-6's shared
+    ``Tracker.track``). Also asserts the read-only invariant: attributing a
+    conversion writes NO new bucketing-decision envelope entry -- only
+    ``run_experience``'s original write is present.
+    """
+    store = _SpyDataStore()
+    core_a = _core(store)
+    ctx_a = core_a.create_context("v-ac11-tracker")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+
+    reallocated = _reallocate_away_from(captured)
+    core_b = _core(store, reallocated)
+    ctx_b = core_b.create_context("v-ac11-tracker")
+    # Rehydrated via the shared store (PY-1); pins that the sticky decision is
+    # genuinely available to be consulted before the assertion below.
+    assert dict(ctx_b._state.bucketing) == {EXP_A_ID: captured}
+
+    key = visitor_state_key("v-ac11-tracker")
+    calls_before = len([call for call in store.set_calls if call[0] == key])
+
+    result = ctx_b.track_conversion(GOAL_KEY)
+
+    assert result.status is ConversionStatus.QUEUED
+    assert result.event is not None
+    # Attribution must name the STICKY variation, not the reallocated
+    # config's fresh-hash winner (the other variation, since `captured`'s
+    # traffic was zeroed out by `_reallocate_away_from`).
+    assert result.event.bucketing_assignments == {EXP_A_ID: captured}
+
+    # Read-only: no NEW "state:"-keyed envelope write from tracking a
+    # conversion (a dedup-marker write under a distinct key prefix is
+    # unaffected and out of scope for this count).
+    calls_after = len([call for call in store.set_calls if call[0] == key])
+    assert calls_after == calls_before
+
+
+def test_ac11_conversion_attribution_sticky_after_reallocation_stateless_fallback_path() -> (
+    None
+):
+    """AC11, the stateless ``create_conversion`` fallback (a ``Context`` built
+    directly, with no shared ``Tracker`` -- ``context.py``'s ``track_conversion``
+    ``else`` branch, ~context.py:898). Mirrors the no-tracker construction
+    precedent in ``tests/test_conversion_tracking.py`` (``Context(visitor_id,
+    snap)``) rather than going through ``Core``, since ``Core.create_context``
+    always attaches a tracker.
+    """
+    initial_snapshot = load_snapshot(_build_config())
+    ctx_initial = Context("v-ac11-fallback", initial_snapshot)
+    assert ctx_initial._tracker is None
+
+    first = ctx_initial.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+
+    reallocated_snapshot = load_snapshot(_reallocate_away_from(captured))
+    # No Core/DataStore in this path -- the sticky decision is carried forward
+    # by constructing the second, reallocated-config Context directly with
+    # the SAME captured decision pre-seeded via ``bucketing=``, the identical
+    # rehydration shape ``Core._hydrate_visitor_state`` performs elsewhere in
+    # this file from a shared store.
+    ctx_reallocated = Context(
+        "v-ac11-fallback", reallocated_snapshot, bucketing={EXP_A_ID: captured}
+    )
+    assert ctx_reallocated._tracker is None
+
+    result = ctx_reallocated.track_conversion(GOAL_KEY)
+
+    assert result.status is ConversionStatus.QUEUED
+    assert result.event is not None
+    assert result.event.bucketing_assignments == {EXP_A_ID: captured}
+
+
+# --- AC12: feature resolution is sticky -------------------------------------
+
+
+def test_ac12_run_feature_sticky_after_reallocation() -> None:
+    store = _SpyDataStore()
+    core_a = _core(store, _build_config(include_feature=True))
+    ctx_a = core_a.create_context("v-ac12-single")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+    expected_headline = _FEATURE_VALUES[captured]
+
+    reallocated = _reallocate_away_from(captured, include_feature=True)
+    core_b = _core(store, reallocated)
+    ctx_b = core_b.create_context("v-ac12-single")
+    assert dict(ctx_b._state.bucketing) == {EXP_A_ID: captured}
+
+    key = visitor_state_key("v-ac12-single")
+    calls_before = len([call for call in store.set_calls if call[0] == key])
+
+    feature_result = ctx_b.run_feature(FEATURE_KEY)
+
+    assert feature_result is not None
+    # Resolved from the STICKY variation's headline, not the reallocated
+    # config's fresh-hash winner's (different) headline.
+    assert feature_result.variables[FEATURE_VAR_KEY] == expected_headline
+
+    # Read-only: resolving a feature persists no new bucketing decision.
+    calls_after = len([call for call in store.set_calls if call[0] == key])
+    assert calls_after == calls_before
+
+
+def test_ac12_run_features_sticky_after_reallocation() -> None:
+    store = _SpyDataStore()
+    core_a = _core(store, _build_config(include_feature=True))
+    ctx_a = core_a.create_context("v-ac12-all")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+    expected_headline = _FEATURE_VALUES[captured]
+
+    reallocated = _reallocate_away_from(captured, include_feature=True)
+    core_b = _core(store, reallocated)
+    ctx_b = core_b.create_context("v-ac12-all")
+    assert dict(ctx_b._state.bucketing) == {EXP_A_ID: captured}
+
+    key = visitor_state_key("v-ac12-all")
+    calls_before = len([call for call in store.set_calls if call[0] == key])
+
+    results = ctx_b.run_features()
+
+    matches = [result for result in results if result.feature_key == FEATURE_KEY]
+    assert len(matches) == 1
+    assert matches[0].variables[FEATURE_VAR_KEY] == expected_headline
+
+    calls_after = len([call for call in store.set_calls if call[0] == key])
+    assert calls_after == calls_before
+
+
+# --- AC13: diagnostics are sticky --------------------------------------------
+
+
+def test_ac13_diagnose_experience_sticky_after_reallocation() -> None:
+    store = _SpyDataStore()
+    core_a = _core(store)
+    ctx_a = core_a.create_context("v-ac13-exp")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+
+    reallocated = _reallocate_away_from(captured)
+    core_b = _core(store, reallocated)
+    ctx_b = core_b.create_context("v-ac13-exp")
+    assert dict(ctx_b._state.bucketing) == {EXP_A_ID: captured}
+
+    key = visitor_state_key("v-ac13-exp")
+    calls_before = len([call for call in store.set_calls if call[0] == key])
+
+    diagnostic = ctx_b.diagnose_experience(EXP_A_KEY)
+
+    assert diagnostic.resolved
+    # Consistent with what run_experience already served (the sticky
+    # variation), not the reallocated config's fresh-hash winner.
+    assert diagnostic.details["variation_key"] == _VARIATION_KEYS[captured]
+
+    calls_after = len([call for call in store.set_calls if call[0] == key])
+    assert calls_after == calls_before
+
+
+def test_ac13_diagnose_feature_sticky_consistent_with_run_feature() -> None:
+    """AC13, ``diagnose_feature``. Unlike ``diagnose_experience``,
+    ``FeatureDiagnostic.details`` carries no variation identity (only
+    ``{"feature_key": ...}``), so a value-diff fixture (both variations
+    carrying the feature, as AC12 uses) cannot distinguish sticky vs
+    fresh-hash from the diagnostic's return shape alone. This test therefore
+    attaches the feature change ONLY to the sticky/captured variation
+    (``feature_variation_ids={captured}``) so the two paths diverge on
+    RESOLVED vs FEATURE_NOT_IN_SELECTED_VARIATIONS, and directly cross-checks
+    the diagnostic against ``run_feature`` on the SAME context so the two
+    stay provably consistent with each other.
+    """
+    store = _SpyDataStore()
+    core_a = _core(store, _build_config())
+    ctx_a = core_a.create_context("v-ac13-feat")
+
+    first = ctx_a.run_experience(EXP_A_KEY)
+    assert first is not None
+    captured = first.variation_id
+
+    reallocated = _reallocate_away_from(
+        captured, include_feature=True, feature_variation_ids=frozenset({captured})
+    )
+    core_b = _core(store, reallocated)
+    ctx_b = core_b.create_context("v-ac13-feat")
+    assert dict(ctx_b._state.bucketing) == {EXP_A_ID: captured}
+
+    # Ground the diagnostic expectation in what run_feature ACTUALLY serves on
+    # this context (AC12 parity), not a re-derivation of the config.
+    feature_result = ctx_b.run_feature(FEATURE_KEY)
+    assert feature_result is not None
+    assert feature_result.variables[FEATURE_VAR_KEY] == _FEATURE_VALUES[captured]
+
+    key = visitor_state_key("v-ac13-feat")
+    calls_before = len([call for call in store.set_calls if call[0] == key])
+
+    diagnostic = ctx_b.diagnose_feature(FEATURE_KEY)
+
+    assert diagnostic.resolved
+
+    calls_after = len([call for call in store.set_calls if call[0] == key])
+    assert calls_after == calls_before
