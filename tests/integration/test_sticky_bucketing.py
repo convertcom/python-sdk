@@ -665,8 +665,11 @@ def test_ac11_conversion_attribution_sticky_after_reallocation_tracker_path() ->
     assert result.event is not None
     # Attribution must name the STICKY variation, not the reallocated
     # config's fresh-hash winner (the other variation, since `captured`'s
-    # traffic was zeroed out by `_reallocate_away_from`).
-    assert result.event.bucketing_assignments == {EXP_A_ID: captured}
+    # traffic was zeroed out by `_reallocate_away_from`). exp-b (100% alloc,
+    # always resolves) is also a real active assignment for this visitor and
+    # must still be present -- attribution is computed over EVERY experience
+    # the visitor buckets into, not just the one under sticky-bucketing test.
+    assert result.event.bucketing_assignments == {EXP_A_ID: captured, EXP_B_ID: VAR_B1}
 
     # Read-only: no NEW "state:"-keyed envelope write from tracking a
     # conversion (a dedup-marker write under a distinct key prefix is
@@ -708,7 +711,9 @@ def test_ac11_conversion_attribution_sticky_after_reallocation_stateless_fallbac
 
     assert result.status is ConversionStatus.QUEUED
     assert result.event is not None
-    assert result.event.bucketing_assignments == {EXP_A_ID: captured}
+    # exp-b (100% alloc, always resolves) is also a real active assignment for
+    # this visitor and must still be present alongside the sticky exp-a entry.
+    assert result.event.bucketing_assignments == {EXP_A_ID: captured, EXP_B_ID: VAR_B1}
 
 
 # --- AC12: feature resolution is sticky -------------------------------------

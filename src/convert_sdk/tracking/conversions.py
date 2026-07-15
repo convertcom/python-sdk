@@ -66,14 +66,22 @@ def _compute_bucketing_assignments(
     *,
     visitor_id: str,
     visitor_attributes: Optional[Mapping[str, Any]],
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, str]:
     """Derive the visitor's active variation assignments at conversion time.
 
-    Computed on demand from the immutable snapshot (no persisted bucketing store
-    exists yet — Story 3.2 will own one). Returns an ``{experience_id:
-    variation_id}`` map for every experience the visitor currently buckets into,
-    which is the attribution context the wire ``bucketingData`` is built from.
-    Reads only the snapshot + caller attributes; performs no I/O.
+    Computed on demand from the immutable snapshot. ``sticky_bucketing`` (qs-03
+    PY-5) is the caller's already-persisted ``{experience_id: variation_id}``
+    read-back map — when it holds a decision that still resolves against this
+    snapshot, that stored/served variation is honored verbatim so attribution
+    reflects the variation actually SERVED to the visitor, not a fresh re-hash
+    that could disagree with it after a traffic reallocation. It falls back to
+    a fresh on-demand hash only when no stored decision resolves for a given
+    experience (unset, absent entry, or an id that no longer resolves). Returns
+    an ``{experience_id: variation_id}`` map for every experience the visitor
+    currently buckets into, which is the attribution context the wire
+    ``bucketingData`` is built from. Reads only the snapshot + caller
+    attributes/read-back map; performs no I/O and persists nothing.
     """
     # Local import keeps the tracking <-> evaluation dependency one-directional
     # at module-load time while still sharing the bucketing logic (the
@@ -90,6 +98,7 @@ def _compute_bucketing_assignments(
             snapshot,
             visitor_id=visitor_id,
             visitor_attributes=visitor_attributes,
+            sticky_bucketing=sticky_bucketing,
         )
         if result is not None:
             assignments[result.experience_id] = result.variation_id
@@ -105,6 +114,7 @@ def create_conversion(
     conversion_data: Optional[Mapping[str, Any]] = None,
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     default_segments: Optional[Mapping[str, Any]] = None,
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> ConversionResult:
     """Create an in-process conversion event for ``goal_key`` and ``visitor_id``.
 
@@ -112,6 +122,10 @@ def create_conversion(
     ``revenue``, caller-supplied ``conversion_data``, and the visitor's
     attribution context (active segments from ``visitor_attributes`` + active
     variation assignments computed from the snapshot at conversion time, FR34).
+    ``sticky_bucketing`` (qs-03 PY-5) is the visitor's persisted
+    ``{experience_id: variation_id}`` read-back map, forwarded read-only into
+    variation-assignment computation so attribution names the variation
+    actually SERVED (sticky) to the visitor rather than a fresh re-hash.
 
     ``conversion_data`` is validated FIRST — before goal resolution — so a bad
     value (non-JSON-primitive / nested) fails fast with a typed
@@ -156,7 +170,10 @@ def create_conversion(
     # data segments are derived from in the current stack). Both are optional;
     # an empty bucketing map is preserved as ``None`` so the serializer omits it.
     bucketing_assignments = _compute_bucketing_assignments(
-        snapshot, visitor_id=visitor_id, visitor_attributes=visitor_attributes
+        snapshot,
+        visitor_id=visitor_id,
+        visitor_attributes=visitor_attributes,
+        sticky_bucketing=sticky_bucketing,
     )
     # Attribution segments: the visitor's attributes provide the legacy
     # attribute-derived segments; the visitor's associated DEFAULT segments

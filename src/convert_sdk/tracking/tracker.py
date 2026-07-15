@@ -157,6 +157,7 @@ class Tracker:
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         default_segments: Optional[Mapping[str, Any]] = None,
         force_multiple: bool = False,
+        sticky_bucketing: Optional[Mapping[str, str]] = None,
     ) -> ConversionResult:
         """Resolve, dedup, and (conditionally) enqueue a conversion.
 
@@ -168,6 +169,12 @@ class Tracker:
         ``default_segments`` (Story 3.3 / FR14) are the visitor's active default
         segments at conversion time; they are passed through to the serializer's
         ``segments`` payload without changing dedup/queue/flush behavior.
+
+        ``sticky_bucketing`` (qs-03 PY-5) is the visitor's persisted
+        ``{experience_id: variation_id}`` read-back map, forwarded read-only
+        into :func:`~convert_sdk.tracking.conversions.create_conversion` so
+        attribution names the sticky (already-served) variation rather than a
+        fresh re-hash.
         """
         result = create_conversion(
             self._snapshot,
@@ -177,6 +184,7 @@ class Tracker:
             conversion_data=conversion_data,
             visitor_attributes=visitor_attributes,
             default_segments=default_segments,
+            sticky_bucketing=sticky_bucketing,
         )
         # Unknown goal: typed NON-EXCEPTION outcome, never enqueued (FR50).
         if result.status is not ConversionStatus.QUEUED or result.event is None:

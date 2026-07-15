@@ -124,6 +124,7 @@ def resolve_feature(
     visitor_id: str,
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     location_attributes: Optional[Mapping[str, Any]] = None,
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> Optional[FeatureResult]:
     """Resolve a single feature by key for ``visitor_id``.
 
@@ -132,6 +133,13 @@ def resolve_feature(
     or ``None`` for any normal miss (undeclared feature, unqualified visitor, no
     bucketed change). Never raises for normal evaluation outcomes and performs
     no network I/O.
+
+    ``sticky_bucketing`` (qs-03 PY-5) is an optional ``{experience_id:
+    variation_id}`` read-back map forwarded verbatim into the inner
+    :func:`~convert_sdk.evaluation.experiences.select_experience` call so
+    feature resolution stays consistent with an already-served/persisted
+    bucketing decision (the shared sticky-read chokepoint, JS parity) instead
+    of re-hashing. This function only reads the map; it persists nothing.
     """
     if not visitor_id:
         return None
@@ -155,6 +163,7 @@ def resolve_feature(
             visitor_id=visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location_attributes,
+            sticky_bucketing=sticky_bucketing,
         )
         if result is None:
             continue
@@ -180,12 +189,16 @@ def resolve_features(
     visitor_id: str,
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     location_attributes: Optional[Mapping[str, Any]] = None,
+    sticky_bucketing: Optional[Mapping[str, str]] = None,
 ) -> List[FeatureResult]:
     """Resolve all applicable features for ``visitor_id``.
 
     Returns one typed result per declared feature the visitor resolves to an
     ``ENABLED`` state; features the visitor does not bucket into are omitted (no
     ``None`` entries). Evaluation stays local to the snapshot — no network I/O.
+
+    ``sticky_bucketing`` (qs-03 PY-5) is forwarded verbatim to each per-feature
+    :func:`resolve_feature` call, read-only.
     """
     results: List[FeatureResult] = []
     for feature in snapshot.features:
@@ -198,6 +211,7 @@ def resolve_features(
             visitor_id=visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location_attributes,
+            sticky_bucketing=sticky_bucketing,
         )
         if result is not None:
             results.append(result)

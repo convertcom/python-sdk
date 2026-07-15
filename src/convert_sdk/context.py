@@ -790,6 +790,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
 
     def run_features(
@@ -812,6 +813,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
 
     # --- conversion tracking -----------------------------------------------
@@ -891,6 +893,7 @@ class Context:
                 visitor_attributes=self._state.visitor_attributes,
                 default_segments=self._state.default_segments,
                 force_multiple=force_multiple,
+                sticky_bucketing=self._state.bucketing,
             )
         else:
             # Fallback: stateless create_conversion (no dedup/queue) for a
@@ -903,6 +906,7 @@ class Context:
                 conversion_data=conversion_data,
                 visitor_attributes=self._state.visitor_attributes,
                 default_segments=self._state.default_segments,
+                sticky_bucketing=self._state.bucketing,
             )
         self._log_conversion(result)
         return result
@@ -1056,6 +1060,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
         if result is not None:
             # Story 4.3: recompute the deterministic bucket value for the
@@ -1118,6 +1123,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
         if result is not None:
             return self._diagnose(
