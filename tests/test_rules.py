@@ -7,7 +7,11 @@ locations means unrestricted => match). Normal misses return ``False`` — never
 exceptions.
 """
 
-from convert_sdk.evaluation.rules import is_rule_matched, qualifies
+from convert_sdk.evaluation.rules import (
+    RULE_TYPE_BUCKETED_INTO_EXPERIENCE_KEY,
+    is_rule_matched,
+    qualifies,
+)
 
 
 # --- is_rule_matched: operator + boolean-tree semantics -----------------------
@@ -243,3 +247,13 @@ def test_regex_matches_case_insensitive():
     """regexMatches is case-insensitive (value is lowercased, regex has IGNORECASE)."""
     rule = _rule("regexMatches", "brand", "^CONVERT")
     assert is_rule_matched({"brand": "Convert Experiences"}, rule) is True
+
+
+# --- qs-04 mutual-exclusion rule-type constant (PY-1, additive/inert) --------
+
+
+def test_rule_type_bucketed_into_experience_key_constant_value():
+    """PY-1 adds only the constant; PY-3 wires the actual dispatch. Pin the
+    exact wire literal (not just truthiness) since it is the qs-04 normative
+    contract value served in config audience rule trees."""
+    assert RULE_TYPE_BUCKETED_INTO_EXPERIENCE_KEY == "bucketed_into_experience_key"

@@ -156,6 +156,27 @@ def log_tracking_delivery_failure(
     )
 
 
+def log_mutual_exclusion_target_not_found(*, target_key: str) -> None:
+    """Log (at WARNING) that a `bucketed_into_experience_key` rule's target
+    experience key was not found in the served config (qs-04 AC8).
+
+    Names only the unresolved ``target_key`` — no visitor id, no attributes.
+    The unresolved target is treated as *not bucketed*, so a ``negated: true``
+    exclusion dissolves (matches web semantics for an archived/unknown target).
+    Currently unused pending the PY-3 dispatch wiring; added here (rather than
+    via ``log_safe``) to match the purpose-built ``log_*`` pattern used by
+    :func:`log_tracking_delivery_failure` / :func:`log_event_handler_error` —
+    this is a new standalone warning concept with no existing
+    :class:`~convert_sdk.events.LifecycleEvent` member to key off of, and
+    adding one is not warranted for a single log call site.
+    """
+    logger.warning(
+        "mutual-exclusion target experience key not found (target_key=%s); "
+        "treated as not bucketed",
+        target_key,
+    )
+
+
 def log_event_handler_error(*, event: str) -> None:
     """Log (at ERROR) that a lifecycle-event handler raised and was swallowed.
 
