@@ -78,6 +78,140 @@ Convert Python SDK — OFFLINE demo
 
 ---
 
+## Testing preview links (qs-02)
+
+An **experiment-preview link** forces one specific variation on a single
+`Context`, bypassing every normal qualification/bucketing gate for that
+experience — audience, location, experience/variation status, traffic
+allocation, and the visitor's own deterministic bucketing hash. It also
+guarantees **zero trace**: no tracking event is enqueued and no visitor state
+is persisted for the previewed context (`Context.set_preview`,
+`convert_sdk.parse_preview_param`).
+
+`demo/config_fixture.json` ships a dedicated preview-only experience built
+specifically to demonstrate this — **the killer proof point**: this experience
+can **never** be served by normal bucketing, because both of its variations
+carry `status: "paused"` (non-running). Only a preview link renders it.
+
+| Entity | id | key | status |
+|--------|----|----|--------|
+| Experience | `900210001` | `preview-only-draft-experience` | `draft` |
+| Variation (control) | `900210101` | `variation-control-draft` | `paused` |
+| Variation (treatment) | `900210102` | `variation-treatment-draft` | `paused` |
+
+Its ids are **numeric** (unlike the string placeholder ids on the primary demo
+experience) because the canonical link format —
+`convert_preview={experienceId}.{variationId}` — requires dot-separated
+numeric-only segments; `parse_preview_param` rejects anything else.
+
+### Run it
+
+```
+CONVERT_DEMO_PREVIEW=900210001.900210101 python demo/run_demo.py
+```
+
+**Expected output (appended after the normal arc above):**
+
+```
+============================================================
+Experiment-preview link demonstration (qs-02)
+============================================================
+  CONVERT_DEMO_PREVIEW = '900210001.900210101'
+
+  parsed pair : (experience_id='900210001', variation_id='900210101')
+
+[P1] run_experience('preview-only-draft-experience')  (the preview target's key)
+    variation_key  : variation-control-draft
+    variation_id   : 900210101
+    PROOF: both of this experience's variations carry status='paused'
+           (non-running) in the fixture, so normal run_experience()
+           would ALWAYS return None for this key. The preview link
+           forced this exact variation regardless, bypassing status,
+           audience, traffic allocation, and the bucketing hash
+           entirely.
+
+[P2] run_experience('test-experience-ab-fullstack-1')  (a DIFFERENT experience -- normal path)
+    variation_key  : variation-treatment  (unaffected by the active preview -- different experience key)
+
+[P3] track_conversion('button-primary-click', force_multiple=True)  (zero-trace check)
+    tracked : False
+    status  : deduplicated
+    Zero-trace: even with force_multiple=True, a preview-active context
+    performs NO dedup-marker read/write, NO queue enqueue, and NO
+    network I/O for track_conversion() -- an UNCONDITIONAL no-op,
+    unlike ordinary dedup (which force_multiple would bypass). Contrast
+    with the normal-path conversion in step [4] above, which queued/
+    tracked normally.
+```
+
+**What this proves:**
+
+1. **The forced draft variation is served even though normal bucketing never
+   would be** — `[P1]` returns `variation-control-draft` for an experience
+   whose variations are both non-running.
+2. **A different experience on the same context is unaffected** — `[P2]`
+   still buckets `test-experience-ab-fullstack-1` normally, proving preview
+   isolation is scoped to the targeted experience only.
+3. **Zero trace** — `[P3]` passes `force_multiple=True` *deliberately*: this
+   isolates preview suppression from ordinary `(visitor, goal)` dedup (the
+   goal was already converted once in step `[4]` of the normal arc). If
+   `tracked=False` were just routine dedup, `force_multiple=True` would
+   bypass it and show `tracked=True`. It stays `False` — proof this is the
+   SDK's unconditional preview suppression, not dedup.
+
+Try the other variation to see the opposite arm forced:
+
+```
+CONVERT_DEMO_PREVIEW=900210001.900210102 python demo/run_demo.py
+```
+
+### Malformed input (inert, never raises)
+
+```
+CONVERT_DEMO_PREVIEW=garbage python demo/run_demo.py
+```
+
+```
+[WARN] Malformed preview param — parse_preview_param() returned None.
+       Expected 'convert_preview={experienceId}.{variationId}' with
+       dot-separated NUMERIC-ONLY ids, e.g.:
+         CONVERT_DEMO_PREVIEW=900210001.900210101
+Per AC7 (inert-on-bad-input), an application would simply skip
+set_preview() here and continue normally — no exception is raised
+and no variation is forced.
+```
+
+`1.2.3` (a second dot) and any non-numeric segment behave identically — this
+is `parse_preview_param`'s AC9 contract, not something the demo re-implements.
+
+An id pair that parses but doesn't resolve to anything in the loaded config
+(e.g. `CONVERT_DEMO_PREVIEW=999999.888888`) takes the same inert path: a
+`[WARN] preview_unresolvable_experience` diagnostic is logged, `run_experience`
+for the preview key returns `None`, and — proving the contrast above —
+`track_conversion(..., force_multiple=True)` in `[P3]` shows `tracked=True`
+(ordinary queuing resumes, because no preview is actually active).
+
+### LIVE mode
+
+The same `CONVERT_DEMO_PREVIEW` env var works in LIVE mode. Set
+`CONVERT_DEMO_PREVIEW_EXPERIENCE_KEY` to the **key** of the real staging
+draft/paused experience you want to preview (the demo has no way to infer a
+real experience's key from its numeric ids alone):
+
+```
+CONVERT_SDK_KEY=10035569/10034190 \
+CONVERT_DEMO_PREVIEW=<realExperienceId>.<realVariationId> \
+CONVERT_DEMO_PREVIEW_EXPERIENCE_KEY=<realExperienceKey> \
+python demo/run_demo.py
+```
+
+If `<realExperienceId>` isn't present in the config LIVE mode already fetched,
+the SDK resolves it via the transport's `?exp=` fetch-through
+(`HttpxTransport.fetch_config_by_experience`) — so you can preview a draft
+experience that was never served in the fetched config at all.
+
+---
+
 ## LIVE mode (opt-in)
 
 Fetches real config from the shared Convert staging project over HTTPS, buckets
@@ -162,8 +296,8 @@ All keys below come from the JS and PHP reference demos; none are invented.
 
 | File | Purpose |
 |------|---------|
-| `demo/run_demo.py` | Dual-mode runner — OFFLINE or LIVE based on `CONVERT_SDK_KEY` |
-| `demo/config_fixture.json` | Committed OFFLINE config with real staging entity keys |
+| `demo/run_demo.py` | Dual-mode runner — OFFLINE or LIVE based on `CONVERT_SDK_KEY`; also wires the preview-link demonstration (`CONVERT_DEMO_PREVIEW`) |
+| `demo/config_fixture.json` | Committed OFFLINE config with real staging entity keys, plus a dedicated draft/paused preview-only experience (`preview-only-draft-experience`) |
 | `demo/.env.example` | Template — copy to `demo/.env` for LIVE credentials |
 | `demo/.env` | Gitignored — never committed; holds real `CONVERT_SDK_KEY` |
 | `demo/README.md` | This file |

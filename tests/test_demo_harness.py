@@ -231,3 +231,97 @@ class TestOfflineFixture:
             assert result.goal_key == "button-primary-click"
         finally:
             core.close()
+
+
+# ---------------------------------------------------------------------------
+# Preview-only draft experience (qs-02 demo wiring)
+# ---------------------------------------------------------------------------
+
+class TestPreviewFixture:
+    """Assert the preview-only draft experience added for the demo's
+
+    ``CONVERT_DEMO_PREVIEW`` wiring: numeric ids, both variations non-running
+    ('paused'), never served by normal bucketing, and force-decidable via
+    ``Context.set_preview`` with zero-trace tracking.
+    """
+
+    _PREVIEW_EXPERIENCE_KEY = "preview-only-draft-experience"
+    _PREVIEW_EXPERIENCE_ID = "900210001"
+    _PREVIEW_VARIATION_CONTROL_ID = "900210101"
+
+    @staticmethod
+    def _offline_context(visitor_id: str = "demo-visitor-001"):
+        fixture = _load_fixture()
+        core = Core(SDKConfig(data=fixture)).initialize()
+        return core, core.create_context(visitor_id)
+
+    def test_preview_experience_present_with_numeric_ids_and_paused_variations(self):
+        """Fixture must carry the dedicated preview-only experience, numeric
+
+        ids throughout (parse_preview_param requires digit-only segments), and
+        every variation non-running so normal bucketing can never serve it.
+        """
+        fixture = _load_fixture()
+        experiences = {e["key"]: e for e in fixture["experiences"]}
+        assert self._PREVIEW_EXPERIENCE_KEY in experiences
+        preview_exp = experiences[self._PREVIEW_EXPERIENCE_KEY]
+        assert preview_exp["id"] == self._PREVIEW_EXPERIENCE_ID
+        variations_by_key = {v["key"]: v for v in preview_exp["variations"]}
+        assert variations_by_key["variation-control-draft"]["id"] == (
+            self._PREVIEW_VARIATION_CONTROL_ID
+        )
+        assert variations_by_key["variation-treatment-draft"]["id"] == "900210102"
+        for variation in preview_exp["variations"]:
+            assert variation["status"] == "paused", (
+                "Every preview-only variation must be non-running so normal "
+                "bucketing can never serve it"
+            )
+
+    def test_normal_run_experience_never_serves_the_draft_experience(self):
+        """Normal (non-preview) evaluation must always miss (both variations paused)."""
+        core, context = self._offline_context()
+        try:
+            result = context.run_experience(self._PREVIEW_EXPERIENCE_KEY)
+            assert result is None
+        finally:
+            core.close()
+
+    def test_set_preview_forces_the_draft_variation_despite_paused_status(self):
+        """set_preview must force the draft variation, bypassing the status gate."""
+        core, context = self._offline_context()
+        try:
+            context.set_preview(self._PREVIEW_EXPERIENCE_ID, self._PREVIEW_VARIATION_CONTROL_ID)
+            result = context.run_experience(self._PREVIEW_EXPERIENCE_KEY)
+            assert result is not None
+            assert result.variation_key == "variation-control-draft"
+            assert result.variation_id == self._PREVIEW_VARIATION_CONTROL_ID
+        finally:
+            core.close()
+
+    def test_preview_does_not_affect_a_different_experience_key(self):
+        """A forced preview on one experience must leave a different experience unaffected."""
+        core, context = self._offline_context()
+        try:
+            context.set_preview(self._PREVIEW_EXPERIENCE_ID, self._PREVIEW_VARIATION_CONTROL_ID)
+            result = context.run_experience("test-experience-ab-fullstack-1")
+            assert result is not None
+            assert result.variation_key == "variation-treatment"
+        finally:
+            core.close()
+
+    def test_preview_context_conversion_is_zero_trace_even_with_force_multiple(self):
+        """track_conversion on a preview-active context is unconditionally untracked.
+
+        ``force_multiple=True`` isolates this from ordinary dedup: if this
+        were routine dedup, force_multiple would bypass it and ``tracked``
+        would be ``True``.
+        """
+        core, context = self._offline_context()
+        try:
+            context.set_preview(self._PREVIEW_EXPERIENCE_ID, self._PREVIEW_VARIATION_CONTROL_ID)
+            result = context.track_conversion(
+                "button-primary-click", revenue=1.0, force_multiple=True
+            )
+            assert result.tracked is False
+        finally:
+            core.close()

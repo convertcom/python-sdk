@@ -40,6 +40,22 @@ Audience attributes:
     These attributes are applied via ``context.set_attributes(...)`` before
     evaluation and are ALSO passed as the per-call ``attributes=`` overlay so
     the ``diagnose_experience`` call uses the same attributes.
+
+Experiment-preview links (qs-02), opt-in via ``CONVERT_DEMO_PREVIEW``:
+    Set ``CONVERT_DEMO_PREVIEW="{experienceId}.{variationId}"`` (dot-separated
+    NUMERIC ids -- the canonical ``convert_preview=`` link value) to force one
+    variation on the context, bypassing every normal qualification/bucketing
+    gate for THAT experience only. In OFFLINE mode the fixture ships a
+    dedicated draft/paused preview-only experience (numeric id
+    ``900210001``, variations ``900210101``/``900210102``) that normal
+    bucketing can NEVER serve -- only ``set_preview()`` renders it:
+
+        CONVERT_DEMO_PREVIEW=900210001.900210101 python demo/run_demo.py
+
+    A malformed value (non-numeric ids, extra dots, etc.) takes the AC7
+    inert-with-warning path -- logged, never raised -- and the rest of the
+    demo runs unaffected. See ``demo/README.md`` ("Testing preview links") for
+    the full walkthrough including the zero-trace and LIVE-mode notes.
 """
 
 from __future__ import annotations
@@ -98,6 +114,7 @@ from convert_sdk import (  # noqa: E402
     SDKConfig,
     TransportConfig,
     TransportError,
+    parse_preview_param,
 )
 
 # ---------------------------------------------------------------------------
@@ -153,6 +170,33 @@ OFFLINE_VISITOR_ID = "demo-visitor-001"
 # Override via CONVERT_DEMO_ATTRIBUTES env var (JSON string).
 _DEFAULT_AUDIENCE_ATTRS: Dict[str, Any] = {"mobile": True}
 
+# ---------------------------------------------------------------------------
+# Experiment-preview link demonstration (qs-02)
+# ---------------------------------------------------------------------------
+# The OFFLINE fixture (demo/config_fixture.json) carries a SECOND, standalone
+# experience built ONLY to demonstrate preview links: 'preview-only-draft-
+# experience' (numeric id 900210001), whose two variations BOTH carry
+# status='paused' (non-running) — normal run_experience()/run_experiences()
+# NEVER serve this experience, regardless of visitor/attributes/bucketing.
+# Only Context.set_preview() bypasses that status gate. Its ids are numeric
+# (unlike the string placeholder ids on the primary demo experience) because
+# parse_preview_param() requires numeric-only dot-separated segments — the
+# same shape a real Convert preview link (`?convert_preview=...`) carries.
+#
+# CONVERT_DEMO_PREVIEW_EXPERIENCE_KEY overrides the KEY the demo calls
+# run_experience() with after set_preview() — needed for LIVE mode, where the
+# targeted experience is a real staging draft/paused experience whose key the
+# demo cannot infer from its numeric ids alone.
+PREVIEW_EXPERIENCE_KEY = os.environ.get(
+    "CONVERT_DEMO_PREVIEW_EXPERIENCE_KEY", "preview-only-draft-experience"
+)
+_PREVIEW_OFFLINE_EXPERIENCE_ID = "900210001"
+_PREVIEW_OFFLINE_VARIATION_CONTROL_ID = "900210101"
+_PREVIEW_OFFLINE_VARIATION_TREATMENT_ID = "900210102"
+_PREVIEW_EXAMPLE_LINK = (
+    f"{_PREVIEW_OFFLINE_EXPERIENCE_ID}.{_PREVIEW_OFFLINE_VARIATION_CONTROL_ID}"
+)
+
 
 def _resolve_audience_attrs() -> Dict[str, Any]:
     """Return audience attributes from CONVERT_DEMO_ATTRIBUTES env var or default."""
@@ -203,6 +247,8 @@ def run_offline() -> int:
     context = core.create_context(OFFLINE_VISITOR_ID)
 
     _run_visitor_arc(context, core, is_live=False, audience_attrs=audience_attrs)
+    print()
+    _run_preview_demo(context, is_live=False)
 
     core.close()
     return 0
@@ -274,6 +320,8 @@ def run_live(sdk_key: str, auth_secret: Optional[str]) -> int:
     context = core.create_context(visitor_id)
 
     _run_visitor_arc(context, core, is_live=True, audience_attrs=audience_attrs)
+    print()
+    _run_preview_demo(context, is_live=True)
 
     # Flush and report.  Tracking is delivered to the SEPARATE metrics endpoint
     # (not the config CDN): track_base_url / track / {sdkKey}, where the
@@ -445,6 +493,145 @@ def _run_visitor_arc(
 
     if not is_live:
         print("[SDK] OFFLINE mode — no flush, no network. Output above is deterministic.")
+
+
+# ---------------------------------------------------------------------------
+# Experiment-preview link demonstration (qs-02) — shared by both modes
+# ---------------------------------------------------------------------------
+
+def _run_preview_demo(context: Any, *, is_live: bool) -> None:
+    """Demonstrate experiment-preview links when CONVERT_DEMO_PREVIEW is set.
+
+    A no-op when the env var is unset (default demo run is unaffected). When
+    set, parses the canonical link value with ``parse_preview_param`` — a
+    malformed value is shown taking the AC7 inert-with-warning path (no
+    exception, no forced variation, the demo continues normally). A
+    well-formed pair is force-decided via ``context.set_preview(...)`` and the
+    two headline guarantees are proven with real output:
+
+    1. The forced variation is served even though the target experience's
+       variations are both non-running ('paused') — normal bucketing would
+       NEVER serve it.
+    2. Zero-trace: ``track_conversion`` on the previewed context returns
+       ``tracked=False`` and performs no queue/persistence/network I/O; a
+       DIFFERENT (non-previewed) experience on the SAME context still decides
+       normally, proving preview isolation (AC5/AC6).
+    """
+    raw_preview = os.environ.get("CONVERT_DEMO_PREVIEW", "").strip()
+    if not raw_preview:
+        return
+
+    print("=" * 60)
+    print("Experiment-preview link demonstration (qs-02)")
+    print("=" * 60)
+    print(f"  CONVERT_DEMO_PREVIEW = {raw_preview!r}")
+    print()
+
+    pair = parse_preview_param(raw_preview)
+    if pair is None:
+        print(
+            "  [WARN] Malformed preview param — parse_preview_param() returned None."
+        )
+        print(
+            "         Expected 'convert_preview={experienceId}.{variationId}' with\n"
+            "         dot-separated NUMERIC-ONLY ids, e.g.:\n"
+            f"           CONVERT_DEMO_PREVIEW={_PREVIEW_EXAMPLE_LINK}"
+        )
+        print(
+            "  Per AC7 (inert-on-bad-input), an application would simply skip\n"
+            "  set_preview() here and continue normally — no exception is raised\n"
+            "  and no variation is forced."
+        )
+        print()
+        return
+
+    experience_id, variation_id = pair
+    print(f"  parsed pair : (experience_id={experience_id!r}, variation_id={variation_id!r})")
+    print()
+
+    context.set_preview(experience_id, variation_id)
+
+    print(f"[P1] run_experience({PREVIEW_EXPERIENCE_KEY!r})  (the preview target's key)")
+    preview_result = context.run_experience(PREVIEW_EXPERIENCE_KEY)
+    if preview_result is not None:
+        print(f"    variation_key  : {preview_result.variation_key}")
+        print(f"    variation_id   : {preview_result.variation_id}")
+        print(
+            "    PROOF: both of this experience's variations carry status='paused'\n"
+            "           (non-running) in the fixture, so normal run_experience()\n"
+            "           would ALWAYS return None for this key. The preview link\n"
+            "           forced this exact variation regardless, bypassing status,\n"
+            "           audience, traffic allocation, and the bucketing hash\n"
+            "           entirely."
+        )
+    else:
+        print(
+            "    result         : None -- set_preview() did not resolve "
+            f"{experience_id!r}/{variation_id!r}\n"
+            "                     (see the [WARN] preview_* diagnostic logged above)."
+        )
+        print(
+            "    In OFFLINE mode the ids must match the fixture's built-in draft\n"
+            f"    experience: {_PREVIEW_OFFLINE_EXPERIENCE_ID}."
+            f"{_PREVIEW_OFFLINE_VARIATION_CONTROL_ID} (control) or "
+            f"{_PREVIEW_OFFLINE_EXPERIENCE_ID}."
+            f"{_PREVIEW_OFFLINE_VARIATION_TREATMENT_ID} (treatment)."
+        )
+    print()
+
+    print(f"[P2] run_experience({EXPERIENCE_KEY!r})  (a DIFFERENT experience -- normal path)")
+    normal_result = context.run_experience(EXPERIENCE_KEY)
+    if normal_result is not None:
+        print(
+            f"    variation_key  : {normal_result.variation_key}  "
+            "(unaffected by the active preview -- different experience key)"
+        )
+    else:
+        print("    result         : None (unaffected by the active preview)")
+    print()
+
+    # force_multiple=True deliberately ISOLATES preview-suppression from
+    # ordinary (visitor, goal) dedup: step [4] above already converted
+    # GOAL_KEY on this same visitor/context, so WITHOUT force_multiple this
+    # call would show tracked=False for the mundane reason of dedup even when
+    # preview is NOT active -- making the preview guarantee ambiguous. With
+    # force_multiple=True, a NON-preview context re-queues (tracked=True); a
+    # preview-ACTIVE context still shows tracked=False regardless (PY-6:
+    # unconditional suppression overrides force_multiple), unambiguously
+    # proving preview zero-trace rather than routine dedup.
+    print(
+        f"[P3] track_conversion({GOAL_KEY!r}, force_multiple=True)  (zero-trace check)"
+    )
+    preview_conv = context.track_conversion(GOAL_KEY, revenue=1.0, force_multiple=True)
+    print(f"    tracked : {preview_conv.tracked}")
+    print(f"    status  : {preview_conv.status.value}")
+    if preview_conv.tracked:
+        print(
+            "    Preview did NOT resolve (see above) -- force_multiple=True bypassed\n"
+            "    ordinary dedup and queued normally, proving this is NOT preview\n"
+            "    suppression when no preview is active."
+        )
+    else:
+        print(
+            "    Zero-trace: even with force_multiple=True, a preview-active context\n"
+            "    performs NO dedup-marker read/write, NO queue enqueue, and NO\n"
+            "    network I/O for track_conversion() -- an UNCONDITIONAL no-op,\n"
+            "    unlike ordinary dedup (which force_multiple would bypass). Contrast\n"
+            "    with the normal-path conversion in step [4] above, which queued/\n"
+            "    tracked normally."
+        )
+    print()
+
+    if is_live:
+        print(
+            "  NOTE: in LIVE mode, an experience_id absent from the locally fetched\n"
+            "  config is resolved via the transport's '?exp=' fetch-through\n"
+            "  (HttpxTransport.fetch_config_by_experience) -- set CONVERT_DEMO_PREVIEW\n"
+            "  and CONVERT_DEMO_PREVIEW_EXPERIENCE_KEY to a real draft/paused staging\n"
+            "  experience's numeric ids + key to preview it even though it was never\n"
+            "  served in the fetched config."
+        )
+        print()
 
 
 # ---------------------------------------------------------------------------
