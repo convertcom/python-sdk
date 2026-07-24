@@ -28,11 +28,40 @@ from convert_sdk.adapters.events.in_process import InProcessEventBus
 from convert_sdk.adapters.storage.in_memory import InMemoryDataStore
 from convert_sdk.events import LifecycleEvent
 from convert_sdk.logging import log_safe
+from convert_sdk.ports.transport import SupportsPreviewFetch
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from convert_sdk.ports.event_bus import EventBus, EventHandler
     from convert_sdk.ports.storage import DataStore
     from convert_sdk.ports.transport import Transport
+
+
+def _find_experience_in_body(
+    body: Dict[str, Any], experience_id: str
+) -> Optional[Mapping[str, Any]]:
+    """Find the experience matching ``experience_id`` in a raw config body.
+
+    Used to pick the target experience out of a ``?exp=``-scoped config-by-
+    experience fetch response (qs-02 PY-5). The wire shape for this SDK's config
+    payloads is already snake_case (no camelCase transform — see
+    ``config_loader/normalizer.py``), so a direct field-name match is safe
+    without running the body through the full validate/normalize pipeline.
+    Returns ``None`` on any miss (absent ``experiences`` list, no matching id) —
+    never raises. An experience with a missing or ``null`` ``id`` never
+    matches, even when ``experience_id`` is the literal string ``"None"`` —
+    guarding the ``str(None) == "None"`` footgun a bare string comparison
+    would otherwise fall into.
+    """
+    experiences = body.get("experiences")
+    if not isinstance(experiences, list):
+        return None
+    for experience in experiences:
+        if not isinstance(experience, Mapping):
+            continue
+        exp_id = experience.get("id")
+        if exp_id is not None and str(exp_id) == str(experience_id):
+            return experience
+    return None
 
 
 class Core:
@@ -161,55 +190,104 @@ class Core:
         # context override matching keys (explicit construction wins). The read
         # is strictly visitor-scoped and goes through the DataStore protocol
         # only — Core (L4) owns the concrete store; downstream sees the protocol.
-        hydrated, segments = self._hydrate_visitor_state(visitor_id, visitor_attributes)
+        hydrated, segments, bucketing = self._hydrate_visitor_state(
+            visitor_id, visitor_attributes
+        )
         return Context(
             visitor_id,
             snapshot,
             visitor_attributes=hydrated,
             default_segments=segments,
+            bucketing=bucketing,
             location_attributes=location_attributes,
             tracker=self._tracker,
             data_store=self._data_store,
             # Story 4.3: forward the config environment so per-visitor
             # diagnostics carry the cross-SDK-comparable environment qualifier.
             environment=self._config.environment,
+            # qs-02 PY-5: bound fetch-through callable for Context.set_preview
+            # (decision I22 — Core owns the duck-check + transport access;
+            # Context never imports a concrete transport or SDKConfig for this).
+            preview_fetch=self._resolve_preview_experience,
         )
+
+    def _resolve_preview_experience(
+        self, experience_id: str
+    ) -> Optional[Mapping[str, Any]]:
+        """Resolve a preview target experience via the transport's ``?exp=``
+        fetch capability, when available (qs-02 PY-5 / decision I22).
+
+        Called by ``Context.set_preview`` ONLY when ``experience_id`` is not
+        present in the locally loaded snapshot. Returns ``None`` (no exception)
+        when there is no remote fetch capability at all: direct-config mode (no
+        remote endpoint to query), or the configured transport does not
+        implement :class:`~convert_sdk.ports.transport.SupportsPreviewFetch` (a
+        custom ``Transport`` lacking the capability degrades gracefully rather
+        than breaking — ``Transport`` itself never gained a new required method
+        for this rare, opt-in capability).
+
+        Propagates whatever the transport raises on an actual fetch failure
+        (e.g. :class:`~convert_sdk.errors.ConfigLoadError`) — ``Context.
+        set_preview`` is responsible for catching that and downgrading to its
+        AC7 inert-with-warning contract. Never touches the DataStore and never
+        mutates the current snapshot.
+        """
+        if self._config.is_direct_config:
+            return None
+        transport = self._ensure_transport()
+        if not isinstance(transport, SupportsPreviewFetch):
+            return None
+        body = transport.fetch_config_by_experience(self._config, experience_id)
+        return _find_experience_in_body(body, experience_id)
 
     def _hydrate_visitor_state(
         self,
         visitor_id: str,
         visitor_attributes: Optional[Mapping[str, Any]],
-    ) -> tuple[Optional[Mapping[str, Any]], Optional[Mapping[str, Any]]]:
-        """Rehydrate persisted visitor attributes AND default segments.
+    ) -> tuple[
+        Optional[Mapping[str, Any]], Optional[Mapping[str, Any]], Optional[Mapping[str, str]]
+    ]:
+        """Rehydrate persisted visitor attributes, default segments, AND bucketing.
 
         Reads this visitor's persisted ``ContextState`` envelope (written by
         :meth:`convert_sdk.context.Context.set_attributes` /
-        :meth:`convert_sdk.context.Context.set_segments`) through the single
-        per-Core ``DataStore`` and returns ``(attributes, default_segments)``.
+        :meth:`convert_sdk.context.Context.set_segments` /
+        :meth:`convert_sdk.context.Context._persist_visitor_state`) through the
+        single per-Core ``DataStore`` and returns
+        ``(attributes, default_segments, bucketing)``.
 
         The persisted value is the structured envelope
-        ``{"attributes": {...}, "segments": {...}}`` (Story 3.3). For backward
-        compatibility a legacy Story 3.2 plain-attributes ``dict`` (no envelope)
-        is treated as attributes-only with empty segments. Caller-supplied
-        ``visitor_attributes`` for this fresh context overlay the persisted
-        attributes (explicit construction wins). The read is strictly
-        visitor-scoped and goes through the ``DataStore`` protocol only — Core
-        (L4) owns the concrete store; downstream sees the protocol. Returns the
-        caller value unchanged (and no segments) when nothing is persisted, so
-        contexts for visitors that never persisted state behave exactly as
-        before.
+        ``{"attributes": {...}, "segments": {...}, "bucketing": {...}}``
+        (qs-03 PY-1). For backward compatibility:
+
+        * a legacy Story 3.3 2-key envelope ``{"attributes": ..., "segments":
+          ...}`` (no ``"bucketing"`` key) hydrates with an EMPTY bucketing map;
+        * a legacy Story 3.2 plain-attributes ``dict`` (no envelope at all) is
+          treated as attributes-only, with empty segments AND empty bucketing.
+
+        Caller-supplied ``visitor_attributes`` for this fresh context overlay
+        the persisted attributes (explicit construction wins). The read is
+        strictly visitor-scoped and goes through the ``DataStore`` protocol
+        only — Core (L4) owns the concrete store; downstream sees the
+        protocol. Returns the caller value unchanged (and no segments/
+        bucketing) when nothing is persisted, so contexts for visitors that
+        never persisted state behave exactly as before.
         """
         stored = self._data_store.get(visitor_state_key(visitor_id))
         stored_attributes: Mapping[str, Any] = {}
         stored_segments: Optional[Mapping[str, Any]] = None
+        stored_bucketing: Optional[Mapping[str, str]] = None
         if isinstance(stored, Mapping) and stored:
             if "attributes" in stored or "segments" in stored:
-                # Story 3.3 structured envelope.
+                # Story 3.3 structured envelope (2-key, or 3-key as of qs-03).
                 raw_attrs = stored.get("attributes")
                 stored_attributes = raw_attrs if isinstance(raw_attrs, Mapping) else {}
                 raw_segments = stored.get("segments")
                 if isinstance(raw_segments, Mapping) and raw_segments:
                     stored_segments = dict(raw_segments)
+                raw_bucketing = stored.get("bucketing")
+                if isinstance(raw_bucketing, Mapping) and raw_bucketing:
+                    stored_bucketing = {str(k): str(v) for k, v in raw_bucketing.items()}
             else:
                 # Legacy Story 3.2 plain-attributes dict (attributes-only).
                 stored_attributes = stored
@@ -221,7 +299,7 @@ class Core:
             if visitor_attributes:
                 merged.update(visitor_attributes)
             attributes = merged
-        return attributes, stored_segments
+        return attributes, stored_segments, stored_bucketing
 
     # --- tracking flush ----------------------------------------------------
 

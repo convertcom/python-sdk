@@ -24,13 +24,15 @@ attribute merge).
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, TypeVar
 
 from convert_sdk._internal.redaction import SafeContext, fingerprint_visitor
 from convert_sdk.domain.context_state import ContextState
 from convert_sdk.domain.results import (
     ConversionResult,
+    ConversionStatus,
     CustomSegmentsResult,
     DiagnosticReason,
     EntityDiagnostic,
@@ -43,13 +45,28 @@ from convert_sdk.domain.results import (
 )
 from convert_sdk.evaluation import entity_lookup
 from convert_sdk.evaluation.bucketing import get_bucket_value_for_visitor
-from convert_sdk.evaluation.experiences import select_experience
+from convert_sdk.evaluation.experiences import get_preview_decision, select_experience
 from convert_sdk.evaluation.features import resolve_feature, resolve_features
 from convert_sdk.evaluation.segments import select_custom_segments
 from convert_sdk.events import LifecycleEvent
 from convert_sdk.logging import log_safe
 from convert_sdk.ports.storage import visitor_state_key
 from convert_sdk.tracking.conversions import create_conversion
+
+#: Per-context experiment-preview state (qs-02 PY-5). Frozen and private to
+#: ``context.py`` -- never shared/leaked across ``Context`` instances (AC6).
+#: ``experience_key`` is captured once at :meth:`Context.set_preview` time (via
+#: :func:`get_preview_decision`'s resolved key) and used to match the key an
+#: app later passes to :meth:`Context.run_experience` /
+#: :meth:`Context.run_experiences`; the forced decision itself is recomputed
+#: FRESH on every matching call (decision I21) rather than cached here, since
+#: :func:`get_preview_decision` is a pure, deterministic function of
+#: ``(experience, variation_id)``.
+@dataclass(frozen=True)
+class _PreviewState:
+    experience: Mapping[str, Any]
+    experience_key: str
+    variation_id: str
 
 # The distinct key under which matched custom-segment IDs are recorded inside
 # the default-segment state (JS ``SegmentsKeys.CUSTOM_SEGMENTS`` parity). Kept in
@@ -95,10 +112,14 @@ class Context:
         *,
         visitor_attributes: Optional[Mapping[str, Any]] = None,
         default_segments: Optional[Mapping[str, Any]] = None,
+        bucketing: Optional[Mapping[str, str]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         tracker: Optional["Tracker"] = None,
         data_store: Optional["DataStore"] = None,
         environment: Optional[str] = None,
+        preview_fetch: Optional[
+            Callable[[str], Optional[Mapping[str, Any]]]
+        ] = None,
     ) -> None:
         # Visitor identity + stored attributes + default segments + snapshot
         # linkage live in the typed ContextState (visitor state stays separate
@@ -109,6 +130,7 @@ class Context:
             snapshot=snapshot,
             visitor_attributes=visitor_attributes or {},
             default_segments=default_segments or {},
+            bucketing=bucketing or {},
         )
         self._snapshot = snapshot
         # Story 2.3: shared tracking orchestrator (dedup + queue). When None,
@@ -130,6 +152,15 @@ class Context:
         # environment qualifier. Optional + defaulting to None keeps the
         # constructor backward compatible (Critical Warning #1).
         self._environment = environment
+        # qs-02 PY-5: bound fetch-through callable (``Core._resolve_preview_experience``)
+        # used ONLY when a preview target id is absent from the local snapshot.
+        # ``None`` for a directly-constructed ``Context`` (no ``Core``) — a
+        # ``set_preview`` call for a snapshot-absent id then simply degrades to
+        # the AC7 inert-with-warning contract rather than raising.
+        self._preview_fetch = preview_fetch
+        # qs-02 PY-5: per-CONTEXT preview state (never shared/leaked across
+        # contexts — AC6). ``None`` until ``set_preview`` resolves successfully.
+        self._preview: Optional[_PreviewState] = None
 
     @property
     def visitor_id(self) -> str:
@@ -295,15 +326,26 @@ class Context:
         this visitor's state key (:func:`visitor_state_key`), never another
         visitor's and never a ``Core``-global key.
 
+        PY-6 (qs-02, decision P2): also a no-op once a preview is active on
+        THIS context (``self._preview is not None``) -- every call site that
+        routes through here (``set_attributes`` / ``set_segments`` /
+        ``run_custom_segments``) writes ZERO ``DataStore`` entries under
+        preview (AC5). The in-memory ``ContextState`` rebind performed by the
+        caller BEFORE this method runs is unaffected, so the visitor state
+        still exists as per-context in-memory scratch and evaluation on this
+        same context continues to see it -- only the durable write is
+        suppressed. This is per-context state, so a concurrent non-preview
+        ``Context`` sharing the same ``DataStore`` persists normally (AC6).
+
         The persisted value is a structured envelope
-        ``{"attributes": {...}, "segments": {...}}`` so a later
-        ``create_context(visitor_id)`` round-trips BOTH the visitor attributes
-        (Story 3.2) and the default segments (Story 3.3) through the same store
-        and hydrate route. The ``DataStore`` four-method surface is unchanged —
-        a plain ``set`` of serialized state; no business logic lives in the
-        store.
+        ``{"attributes": {...}, "segments": {...}, "bucketing": {...}}`` so a
+        later ``create_context(visitor_id)`` round-trips the visitor attributes
+        (Story 3.2), the default segments (Story 3.3), and the sticky-bucketing
+        decision map (qs-03 PY-1) through the same store and hydrate route. The
+        ``DataStore`` four-method surface is unchanged — a plain ``set`` of
+        serialized state; no business logic lives in the store.
         """
-        if self._data_store is None:
+        if self._data_store is None or self._preview is not None:
             return None
         key = visitor_state_key(self._state.visitor_id)
         self._data_store.set(
@@ -311,6 +353,7 @@ class Context:
             {
                 "attributes": dict(self._state.visitor_attributes),
                 "segments": dict(self._state.default_segments),
+                "bucketing": dict(self._state.bucketing),
             },
         )
         return None
@@ -393,6 +436,198 @@ class Context:
             **optional,
         )
 
+    # --- experiment preview (qs-02 PY-5) ------------------------------------
+
+    def set_preview(self, experience_id: str, variation_id: str) -> None:
+        """Force ``variation_id`` on ``experience_id`` for this context only.
+
+        Resolution is EAGER: this method itself resolves the target experience
+        and validates the ``variation_id`` synchronously (decision I20) — it is
+        never deferred to a later :meth:`run_experience` /
+        :meth:`run_experiences` call. Resolution order:
+
+        1. Look up ``experience_id`` in the current immutable config snapshot.
+        2. On a local miss, fetch it via the transport's ``?exp=`` capability
+           (when the ``Context`` was created via ``Core`` and the configured
+           transport supports it — see
+           :class:`~convert_sdk.ports.transport.SupportsPreviewFetch`).
+
+        Once resolved, the target's variation is force-decided via
+        :func:`~convert_sdk.evaluation.experiences.get_preview_decision`,
+        bypassing every normal qualification/bucketing gate (audience, status,
+        traffic allocation, the visitor's own deterministic bucketing hash).
+        The forced decision then takes PRECEDENCE over normal evaluation for
+        ``experience_id`` on THIS context only — every other experience, and
+        every OTHER context (including one created from the same ``Core``),
+        decides normally (AC6 isolation; state lives on ``self._preview``,
+        never shared/leaked).
+
+        Inert on bad input (AC7) — never raises: empty ``experience_id``/
+        ``variation_id``, an experience id unresolvable both locally and via
+        the ``?exp=`` fetch, a failed fetch (transport error), or an unknown
+        ``variation_id`` on an otherwise-resolved experience all degrade to a
+        logged WARNING with NO preview forcing stored — the context continues
+        to behave exactly as if ``set_preview`` had never been called.
+
+        Args:
+            experience_id: The target experience's ``id`` (NOT its ``key``) —
+                the identifier the ``?exp=`` fetch and
+                :func:`get_preview_decision` operate on.
+            variation_id: The variation ``id`` to force.
+
+        Returns:
+            ``None``.
+        """
+        if not experience_id or not variation_id:
+            self._preview = None
+            self._warn_preview(experience_id or None, "empty_id")
+            return
+
+        experience = self._snapshot.get_experience_by_id(experience_id)
+        if experience is None:
+            experience = self._fetch_preview_experience(experience_id)
+
+        if experience is None:
+            self._preview = None
+            self._warn_preview(experience_id, "unresolvable_experience")
+            return
+
+        decision = get_preview_decision(experience, variation_id)
+        if decision is None:
+            self._preview = None
+            self._warn_preview(experience_id, "unknown_variation")
+            return
+
+        self._preview = _PreviewState(
+            experience=experience,
+            experience_key=decision.experience_key,
+            variation_id=variation_id,
+        )
+
+    def _fetch_preview_experience(
+        self, experience_id: str
+    ) -> Optional[Mapping[str, Any]]:
+        """Resolve ``experience_id`` via the injected ``?exp=`` fetch-through
+        callable, or return ``None`` on any failure (no fetch capability, or the
+        fetch itself raised) so :meth:`set_preview` can apply the SAME
+        inert-with-warning handling regardless of the underlying cause.
+        """
+        if self._preview_fetch is None:
+            return None
+        try:
+            return self._preview_fetch(experience_id)
+        except Exception:
+            return None
+
+    def _warn_preview(self, entity_key: Optional[str], reason: str) -> None:
+        """Emit an additive, allowlist-only WARNING for an inert preview call.
+
+        Routes through the SAME Story 4.1 :func:`log_safe` seam every other SDK
+        log call site uses. Carries ONLY the target experience id (an entity
+        identifier, not PII) and a closed ``preview_<reason>`` code — never a raw
+        ``visitor_id`` or visitor attributes (NFR6).
+        """
+        log_safe(
+            LifecycleEvent.DIAGNOSTIC,
+            level=logging.WARNING,
+            context=SafeContext(entity_key=entity_key),
+            reason=f"preview_{reason}",
+        )
+
+    def _resolve_experience_result(
+        self,
+        experience_key: str,
+        attributes: Optional[Mapping[str, Any]],
+        location_attributes: Optional[Mapping[str, Any]],
+    ) -> Optional[ExperienceResult]:
+        """Resolve the result for ``experience_key``, honoring a forced preview.
+
+        When a preview is set (:meth:`set_preview`) AND ``experience_key``
+        matches the forced target's key, the forced decision takes PRECEDENCE
+        over normal evaluation — bypassing qualification/bucketing entirely
+        (decision I21: recomputed fresh via the pure
+        :func:`~convert_sdk.evaluation.experiences.get_preview_decision`, never
+        cached). Every other experience decides normally.
+        """
+        if self._preview is not None and self._preview.experience_key == experience_key:
+            forced = get_preview_decision(self._preview.experience, self._preview.variation_id)
+            if forced is not None:
+                return forced
+        visitor_attributes = self._state.with_overlay(attributes)
+        location = self._merge(self._location_attributes, location_attributes)
+        return select_experience(
+            experience_key,
+            self._snapshot,
+            visitor_id=self._state.visitor_id,
+            visitor_attributes=visitor_attributes,
+            location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
+        )
+
+    def _record_experience_result(
+        self, result: Optional[ExperienceResult], enable_tracking: bool
+    ) -> None:
+        """Shared post-resolution bookkeeping for a single experience result.
+
+        Applied identically to a normal or a preview-forced result. PY-6
+        (qs-02, decision P2): once a preview is active on THIS context
+        (``self._preview is not None``), the bucketing-activation tracker call
+        is unconditionally suppressed -- for the forced target AND for every
+        other, normally-decided experience on the SAME context (AC5) --
+        overriding a per-call ``enable_tracking=True``. Suppression keys off
+        per-context ``self._preview`` state only, so a concurrent non-preview
+        ``Context`` sharing the same ``Tracker``/``DataStore`` is unaffected
+        (AC6). Local diagnostic logging (``_log_bucketing``) is unrelated to
+        the network/persistence "trace" this suppression targets and is
+        deliberately left unconditional.
+        """
+        if result is None:
+            return
+        self._log_bucketing(result)
+        if enable_tracking and self._tracker is not None and self._preview is None:
+            self._tracker.track_bucketing(
+                visitor_id=self._state.visitor_id,
+                experience_id=result.experience_id,
+                variation_id=result.variation_id,
+            )
+
+    def _evaluate_and_record(
+        self,
+        experience_key: str,
+        attributes: Optional[Mapping[str, Any]],
+        location_attributes: Optional[Mapping[str, Any]],
+        enable_tracking: bool,
+        enable_storage: bool = True,
+    ) -> Optional[ExperienceResult]:
+        """Resolve one experience's result and apply the shared bookkeeping.
+
+        qs-03 PY-3: after the shared tracking/logging bookkeeping, a fresh
+        (non-sticky, non-preview-forced) bucketing decision is persisted into
+        the visitor-state envelope's ``bucketing`` map — write-after-hash, per
+        the spec algorithm. The write is gated three ways (ALL must hold):
+
+        * ``result is not None`` — a real decision was produced.
+        * ``enable_storage`` — the new per-call flag (default ``True``).
+        * ``self._preview is None`` — no preview active on this context.
+
+        The final ``bucketing.get(result.experience_id) != result.variation_id``
+        check makes the write a no-op on a sticky read-back (the stored value
+        already equals the fresh/sticky result), so a sticky hit never
+        re-persists, while a fall-through (AC4, stored id no longer resolves)
+        still overwrites the stale entry with the freshly hashed one.
+        """
+        result = self._resolve_experience_result(experience_key, attributes, location_attributes)
+        self._record_experience_result(result, enable_tracking)
+        if (
+            result is not None
+            and enable_storage
+            and self._preview is None
+            and self._state.bucketing.get(result.experience_id) != result.variation_id
+        ):
+            self._state = self._state.with_bucketing({result.experience_id: result.variation_id})
+            self._persist_visitor_state()
+        return result
+
     # --- evaluation surface ------------------------------------------------
 
     def _merge(
@@ -417,6 +652,7 @@ class Context:
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         enable_tracking: bool = True,
+        enable_storage: bool = True,
     ) -> Optional[ExperienceResult]:
         """Evaluate a single experience by key for this visitor.
 
@@ -426,6 +662,12 @@ class Context:
         qualifies and buckets into a variation, or ``None`` for any normal miss
         (missing experience, unqualified visitor, no active variation). Never
         raises for normal evaluation outcomes and performs no network I/O.
+
+        A successful bucket also persists the decision (qs-03 sticky-bucketing
+        persistence) into the visitor-state ``bucketing`` map — in-memory
+        immediately and through the injected ``DataStore`` when one is
+        configured — so a later call for the SAME ``experience_key`` returns
+        the stored decision without re-hashing (see ``enable_storage`` below).
 
         Args:
             experience_key: The experience key to evaluate.
@@ -439,24 +681,18 @@ class Context:
                 :class:`~convert_sdk.domain.results.ExperienceResult` is
                 identical regardless of this flag — it gates tracking only, not
                 evaluation. Must be passed as a keyword argument.
+            enable_storage: When ``True`` (the default), a fresh bucketing
+                decision is persisted into the visitor-state ``bucketing`` map
+                (parity with JS ``BucketingAttributes.enableStorage``). When
+                ``False``, nothing is persisted for THIS call — the returned
+                result is unaffected. Gates ONLY the bucketing-decision
+                persist; unrelated persistence (``set_attributes`` /
+                ``set_segments``) is untouched. Must be passed as a keyword
+                argument.
         """
-        visitor_attributes = self._state.with_overlay(attributes)
-        location = self._merge(self._location_attributes, location_attributes)
-        result = select_experience(
-            experience_key,
-            self._snapshot,
-            visitor_id=self._state.visitor_id,
-            visitor_attributes=visitor_attributes,
-            location_attributes=location,
+        return self._evaluate_and_record(
+            experience_key, attributes, location_attributes, enable_tracking, enable_storage
         )
-        self._log_bucketing(result)
-        if result is not None and enable_tracking and self._tracker is not None:
-            self._tracker.track_bucketing(
-                visitor_id=self._state.visitor_id,
-                experience_id=result.experience_id,
-                variation_id=result.variation_id,
-            )
-        return result
 
     def run_experiences(
         self,
@@ -464,6 +700,7 @@ class Context:
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         enable_tracking: bool = True,
+        enable_storage: bool = True,
     ) -> List[ExperienceResult]:
         """Evaluate all applicable experiences for this visitor.
 
@@ -480,30 +717,47 @@ class Context:
                 result enqueues a bucketing activation event via the tracker
                 (Story 2.5). When ``False``, no bucketing events are enqueued
                 for any resolved experience. Must be passed as a keyword argument.
+            enable_storage: When ``True`` (the default), each fresh bucketing
+                decision is persisted into the visitor-state ``bucketing`` map
+                (see :meth:`run_experience`). Must be passed as a keyword
+                argument.
+
+        A forced preview target (:meth:`set_preview`) that already exists in the
+        loaded snapshot is naturally overridden here as this method iterates the
+        snapshot's experiences. A preview target resolved ONLY via the ``?exp=``
+        fetch (never registered in the loaded snapshot) is additionally
+        synthesized into the results — resolution is eager (decision I20), so
+        the forced decision is already in hand by the time this method runs.
         """
-        visitor_attributes = self._state.with_overlay(attributes)
-        location = self._merge(self._location_attributes, location_attributes)
         results: List[ExperienceResult] = []
+        seen_keys: set[str] = set()
         for experience in self._snapshot.experiences:
             key = experience.get("key")
             if key is None:
                 continue
-            result = select_experience(
-                str(key),
-                self._snapshot,
-                visitor_id=self._state.visitor_id,
-                visitor_attributes=visitor_attributes,
-                location_attributes=location,
+            key_str = str(key)
+            seen_keys.add(key_str)
+            result = self._evaluate_and_record(
+                key_str, attributes, location_attributes, enable_tracking, enable_storage
             )
             if result is not None:
                 results.append(result)
-                self._log_bucketing(result)
-                if enable_tracking and self._tracker is not None:
-                    self._tracker.track_bucketing(
-                        visitor_id=self._state.visitor_id,
-                        experience_id=result.experience_id,
-                        variation_id=result.variation_id,
-                    )
+
+        if (
+            self._preview is not None
+            and self._preview.experience_key
+            and self._preview.experience_key not in seen_keys
+        ):
+            forced = self._evaluate_and_record(
+                self._preview.experience_key,
+                attributes,
+                location_attributes,
+                enable_tracking,
+                enable_storage,
+            )
+            if forced is not None:
+                results.append(forced)
+
         return results
 
     # --- feature resolution ------------------------------------------------
@@ -536,6 +790,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
 
     def run_features(
@@ -558,6 +813,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
 
     # --- conversion tracking -----------------------------------------------
@@ -610,7 +866,24 @@ class Context:
 
         The enqueue path performs no network I/O and stays lightweight (NFR5);
         delivery happens at flush time (``Core.flush()``).
+
+        PY-6 (qs-02, decision P2 / I32): ``track_conversion`` has no
+        ``enable_tracking`` parameter, so once a preview is active on THIS
+        context (``self._preview is not None``) it is an UNCONDITIONAL no-op —
+        no dedup-marker read/write, no queue enqueue, no network I/O — for
+        EVERY call regardless of ``force_multiple``. The returned
+        :class:`~convert_sdk.domain.results.ConversionResult` reuses the
+        existing ``DEDUPLICATED`` status (``tracked=False``,
+        ``reason="deduplicated"``) rather than introducing a new
+        ``ConversionStatus`` member (see decision log I32): it is the closest
+        existing "call resulted in no enqueue, not because the goal is
+        unknown" outcome, and no test asserts on the exact status/reason
+        value under preview (I32), only on ``tracked is False``.
         """
+        if self._preview is not None:
+            result = self._preview_suppressed_conversion(goal_key)
+            self._log_conversion(result)
+            return result
         if self._tracker is not None:
             result = self._tracker.track(
                 visitor_id=self._state.visitor_id,
@@ -620,6 +893,7 @@ class Context:
                 visitor_attributes=self._state.visitor_attributes,
                 default_segments=self._state.default_segments,
                 force_multiple=force_multiple,
+                sticky_bucketing=self._state.bucketing,
             )
         else:
             # Fallback: stateless create_conversion (no dedup/queue) for a
@@ -632,9 +906,33 @@ class Context:
                 conversion_data=conversion_data,
                 visitor_attributes=self._state.visitor_attributes,
                 default_segments=self._state.default_segments,
+                sticky_bucketing=self._state.bucketing,
             )
         self._log_conversion(result)
         return result
+
+    def _preview_suppressed_conversion(self, goal_key: str) -> ConversionResult:
+        """Build the untracked :class:`ConversionResult` for a preview context.
+
+        Resolves ``goal_id`` from the snapshot when the goal is known (purely
+        for diagnosability, mirroring the fields a real outcome would carry)
+        WITHOUT touching the tracker, dedup store, or queue. Reuses
+        ``ConversionStatus.DEDUPLICATED`` (decision log I32) rather than a new
+        enum member — ``tracked`` is ``False`` either way, which is the only
+        PRD-contractual signal this call site guarantees.
+        """
+        goal = self._snapshot.get_goal_by_key(goal_key)
+        goal_id: Optional[str] = None
+        if goal is not None:
+            raw_goal_id = goal.get("id")
+            goal_id = str(raw_goal_id) if raw_goal_id is not None else None
+        return ConversionResult(
+            status=ConversionStatus.DEDUPLICATED,
+            goal_key=goal_key,
+            goal_id=goal_id,
+            visitor_id=self._state.visitor_id,
+            event=None,
+        )
 
     # --- entity lookup (Story 3.4 / FR28) ----------------------------------
 
@@ -762,6 +1060,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
         if result is not None:
             # Story 4.3: recompute the deterministic bucket value for the
@@ -824,6 +1123,7 @@ class Context:
             visitor_id=self._state.visitor_id,
             visitor_attributes=visitor_attributes,
             location_attributes=location,
+            sticky_bucketing=self._state.bucketing,
         )
         if result is not None:
             return self._diagnose(

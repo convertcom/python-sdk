@@ -16,7 +16,11 @@ import pytest
 
 from convert_sdk._internal.redaction import SafeContext
 from convert_sdk.events import LifecycleEvent
-from convert_sdk.logging import log_safe, logger as sdk_logger
+from convert_sdk.logging import (
+    log_mutual_exclusion_target_not_found,
+    log_safe,
+    logger as sdk_logger,
+)
 
 
 def test_log_safe_emits_on_convert_sdk_namespace(caplog):
@@ -156,3 +160,19 @@ def test_sdk_logger_propagate_default_unchanged():
     # The SDK does not flip propagate off (that would swallow records in apps
     # that configure the root logger).
     assert sdk_logger.propagate is True
+
+
+# --- qs-04 mutual-exclusion unknown-target warning (PY-1, AC8) ---------------
+
+
+def test_log_mutual_exclusion_target_not_found_emits_warning_naming_the_key(caplog):
+    with caplog.at_level(logging.DEBUG, logger="convert_sdk"):
+        log_mutual_exclusion_target_not_found(target_key="exp-zz")
+    records = [r for r in caplog.records if r.name == "convert_sdk"]
+    assert records, "log_mutual_exclusion_target_not_found must emit on the convert_sdk logger"
+    rec = records[-1]
+    assert rec.levelno == logging.WARNING
+    msg = rec.getMessage()
+    assert "exp-zz" in msg
+    assert "not found" in msg
+    assert "not bucketed" in msg

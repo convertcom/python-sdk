@@ -46,6 +46,7 @@ class ContextState:
     snapshot: "ConfigSnapshot"
     visitor_attributes: Mapping[str, Any] = field(default_factory=dict)
     default_segments: Mapping[str, Any] = field(default_factory=dict)
+    bucketing: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Store a defensive, read-only copy so caller-side mutation cannot leak
@@ -64,6 +65,16 @@ class ContextState:
                 self,
                 "default_segments",
                 MappingProxyType(dict(self.default_segments or {})),
+            )
+        # qs-03 PY-1: the persisted per-visitor sticky-bucketing decision map is
+        # a THIRD distinct visitor-state concern, kept strictly separate from
+        # both visitor_attributes and default_segments. Copied defensively and
+        # wrapped read-only, exactly like the other two fields.
+        if not isinstance(self.bucketing, MappingProxyType):
+            object.__setattr__(
+                self,
+                "bucketing",
+                MappingProxyType(dict(self.bucketing or {})),
             )
 
     def with_overlay(self, overlay: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
@@ -113,6 +124,7 @@ class ContextState:
             snapshot=self.snapshot,
             visitor_attributes=merged,
             default_segments=self.default_segments,
+            bucketing=self.bucketing,
         )
 
     def with_segments(self, new_segments: Optional[Mapping[str, Any]]) -> "ContextState":
@@ -146,4 +158,33 @@ class ContextState:
             snapshot=self.snapshot,
             visitor_attributes=self.visitor_attributes,
             default_segments=merged,
+            bucketing=self.bucketing,
+        )
+
+    def with_bucketing(self, new: Optional[Mapping[str, str]]) -> "ContextState":
+        """Return a NEW :class:`ContextState` with ``new`` bucketing decisions merged in.
+
+        This is the immutable, PERSISTENT sticky-bucketing decision update
+        operation (qs-03 PY-1 / FR42). It shallow-merges the stored bucketing
+        decision map with ``new`` — new keys override touched keys, untouched
+        keys persist — mirroring :meth:`with_attributes` / :meth:`with_segments`
+        for this THIRD distinct visitor-state field.
+
+        The update targets ONLY the DISTINCT :attr:`bucketing` field;
+        ``visitor_attributes`` and ``default_segments`` are carried through
+        unchanged. The original instance is never mutated: a fresh frozen
+        ``ContextState`` is returned, carrying the same ``visitor_id`` and the
+        same :class:`ConfigSnapshot` by reference (the snapshot is shared,
+        never copied or mutated per visitor). When ``new`` is empty/``None``
+        the merge is a content-equal no-op copy, preserving determinism.
+        """
+        merged = dict(self.bucketing)
+        if new:
+            merged.update(new)
+        return ContextState(
+            visitor_id=self.visitor_id,
+            snapshot=self.snapshot,
+            visitor_attributes=self.visitor_attributes,
+            default_segments=self.default_segments,
+            bucketing=merged,
         )

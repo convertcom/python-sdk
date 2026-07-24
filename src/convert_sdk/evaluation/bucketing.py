@@ -25,7 +25,7 @@ Output is an **unsigned** 32-bit integer in ``[0, 2**32)`` — matching the npm
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 # Frozen bucketing constants — match the JS SDK's BucketingManager defaults
 # (../javascript-sdk/packages/bucketing/src/bucketing-manager.ts).
@@ -148,4 +148,58 @@ def select_bucket(
         cumulative += percentage * 100 + redistribute
         if value < cumulative:
             return bucket_id
+    return None
+
+
+def build_bucket_ranges(
+    allocations: Sequence[Mapping[str, Any]],
+) -> "list[dict[str, Any]]":
+    """Build anchored ``[anchor, anchor + width)`` ranges from variation allocations.
+
+    Mirrors the JS SDK's ``BucketingManager.getBucketRanges`` (bucketing contract
+    v12, the anchored layout). Each entry of ``allocations`` carries
+    ``{"id", "allocation", "active"}`` — see
+    :func:`convert_sdk.evaluation.experiences._build_variation_allocations`, the
+    config-aware builder that produces this shape.
+
+    Anchors are derived from the cumulative allocation weight of **all**
+    entries, active and inactive alike, so stopping (or resuming) one arm
+    never moves any other arm's anchor — only that arm's own width collapses
+    to (or reopens from) zero. Returns ``[]`` when the total weight is
+    ``<= 0`` (not bucketed), mirroring :func:`select_bucket`'s "normal miss
+    returns None" contract one level up.
+    """
+    total_weight = sum(float(entry["allocation"]) for entry in allocations)
+    if total_weight <= 0:
+        return []
+
+    ranges: "list[dict[str, Any]]" = []
+    cumulative_weight = 0.0
+    for entry in allocations:
+        allocation = float(entry["allocation"])
+        anchor = (cumulative_weight / total_weight) * DEFAULT_MAX_TRAFFIC
+        width = allocation * 100 if entry["active"] else 0.0
+        ranges.append({"id": str(entry["id"]), "anchor": anchor, "width": width})
+        cumulative_weight += allocation
+    return ranges
+
+
+def select_bucket_anchored(
+    ranges: Sequence[Mapping[str, Any]],
+    value: int,
+) -> Optional[str]:
+    """Select a bucket id for ``value`` from anchored ``[anchor, anchor + width)`` ranges.
+
+    Mirrors the JS SDK's ``BucketingManager.selectBucketAnchored``: returns the
+    id of the first range (output of :func:`build_bucket_ranges`) whose
+    half-open interval contains ``value`` — ``anchor <= value < anchor +
+    width``. Returns ``None`` when no range matches (empty ranges, a
+    zero-width/inactive arm, or ``value`` landing in an idle sliver) — a
+    normal no-result outcome, never an exception.
+    """
+    for entry in ranges:
+        anchor = entry["anchor"]
+        width = entry["width"]
+        if anchor <= value < anchor + width:
+            return str(entry["id"])
     return None

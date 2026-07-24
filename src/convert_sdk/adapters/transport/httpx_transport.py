@@ -9,16 +9,22 @@ by the real Convert config-serving CDN and matches the PHP SDK's generated clien
 (``ProjectConfigApi``, server base ``https://cdn-4.convertexperiments.com/api/v1``,
 resource path ``/config/{sdkKey}``).
 
-Two optional query parameters are appended conditionally:
+Up to three optional query parameters are appended conditionally:
 
 * ``environment={environment}`` — present only when a non-default environment
   is configured.
-* ``_conv_low_cache=1`` — present only when the cache level is ``"low"``.
+* ``debug_token={debug_token}`` — present only when ``SDKConfig.debug_token``
+  is set (qs-02 AC1, experiment-preview). Config-fetch route ONLY — never sent
+  on the tracking (metrics) request.
+* ``_conv_low_cache=1`` — present when the cache level is ``"low"``, OR
+  forced (regardless of ``cache_level``) whenever ``debug_token`` is set,
+  since a preview fetch must always bypass the CDN cache. Never duplicated
+  when both conditions independently ask for it.
 
 These parameters mirror the query shape used by the JS SDK. The JS implementation
-concatenates the two parameters without a separator (producing
+concatenates the two legacy parameters without a separator (producing
 ``?environment=prod_conv_low_cache=1``). This adapter preserves the *intent*
-(both parameters present, conditionally) while emitting a well-formed, parseable
+(each parameter present, conditionally) while emitting a well-formed, parseable
 query string (parameters joined with ``&``) — see the Story 1.2 readiness note.
 Tests assert presence/absence of each parameter, not the malformed concatenation.
 
@@ -49,7 +55,9 @@ set this header on every tracking request.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import threading
+import time
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode
 
 import httpx
@@ -57,6 +65,28 @@ import httpx
 from convert_sdk._internal.redaction import redact_url
 from convert_sdk.config import SDKConfig, TransportConfig
 from convert_sdk.errors import ConfigLoadError, TrackingDeliveryError
+
+#: Process-wide TTL for the ``?exp=`` config-by-experience memo (qs-02 PY-4 /
+#: decision P3, JS parity: ``CONFIG_BY_EXPERIENCE_TTL = 60000`` ms).
+_CONFIG_BY_EXPERIENCE_TTL_SECONDS = 60.0
+
+#: Process-wide memo of resolved config-by-experience bodies, keyed by
+#: ``f"{sdk_key}:{experience_id}"``. Value is ``(body, fetched_at)`` where
+#: ``fetched_at`` is a wall-clock timestamp from :data:`_now`. Never touches
+#: the DataStore -- this is a purely in-memory, process-wide cache (decision
+#: P3; qs-02 contract Section 2).
+_CONFIG_BY_EXPERIENCE_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
+
+#: Single global lock guarding the ENTIRE check+fetch+store critical section
+#: for `_CONFIG_BY_EXPERIENCE_CACHE` (decision P3) -- deliberately a single
+#: lock, not per-key, since config-by-experience fetches are rare (QA/preview
+#: only) and this keeps the implementation simple without meaningfully
+#: hurting concurrency.
+_CONFIG_BY_EXPERIENCE_LOCK = threading.Lock()
+
+#: Monkeypatchable wall-clock seam (tests replace this with a fixed/stepping
+#: callable to make TTL expiry deterministic without real sleeping).
+_now = time.time
 
 
 class HttpxTransport:
@@ -92,7 +122,14 @@ class HttpxTransport:
         params = []
         if config.environment:
             params.append(("environment", config.environment))
-        if config.cache_level == "low":
+        if config.debug_token:
+            # A preview fetch must always bypass the CDN cache, regardless of
+            # cache_level — force _conv_low_cache=1 without duplicating it
+            # when cache_level="low" already asks for the same param (qs-02
+            # AC1).
+            params.append(("debug_token", config.debug_token))
+            params.append(("_conv_low_cache", "1"))
+        elif config.cache_level == "low":
             params.append(("_conv_low_cache", "1"))
         return urlencode(params) if params else ""
 
@@ -102,10 +139,35 @@ class HttpxTransport:
         route = f"/api/v1/config/{config.sdk_key}"
         return f"{route}?{query}" if query else route
 
+    @staticmethod
+    def _build_experience_query(config: SDKConfig, experience_id: str) -> str:
+        """Query for the ``?exp=`` config-by-experience fetch (qs-02 PY-4).
+
+        Unlike :meth:`_build_query`, ``_conv_low_cache=1`` is forced
+        UNCONDITIONALLY here (never gated on ``cache_level``) since a preview
+        lookup must always bypass the CDN cache. Param order: ``exp``, then
+        ``_conv_low_cache=1``, then ``debug_token`` last when set.
+        """
+        params = [("exp", experience_id), ("_conv_low_cache", "1")]
+        if config.debug_token:
+            params.append(("debug_token", config.debug_token))
+        return urlencode(params)
+
+    @staticmethod
+    def _build_experience_route(config: SDKConfig, experience_id: str) -> str:
+        query = HttpxTransport._build_experience_query(config, experience_id)
+        route = f"/api/v1/config/{config.sdk_key}"
+        return f"{route}?{query}" if query else route
+
     # --- transport port ----------------------------------------------------
 
-    def fetch_config(self, config: SDKConfig) -> Dict[str, Any]:
-        route = self._build_route(config)
+    def _get_config_json(self, route: str) -> Dict[str, Any]:
+        """Shared GET + typed-error contract for both config-fetch routes.
+
+        Reused by :meth:`fetch_config` and :meth:`fetch_config_by_experience`
+        so the two routes share the exact same error-handling behavior
+        (NFR23 / qs-08 shim) rather than diverging.
+        """
         # Endpoint used only for diagnostics; ConfigLoadError redacts the query.
         endpoint = f"{self._config.base_url}{route}"
         try:
@@ -139,6 +201,60 @@ class HttpxTransport:
                 status_code=response.status_code,
             )
         return body
+
+    def fetch_config(self, config: SDKConfig) -> Dict[str, Any]:
+        route = self._build_route(config)
+        return self._get_config_json(route)
+
+    def fetch_config_by_experience(
+        self, config: SDKConfig, experience_id: str
+    ) -> Dict[str, Any]:
+        """Fetch config scoped to a single experience via ``?exp={id}``.
+
+        Memoized process-wide (module-level, thread-safe, 60s wall-clock
+        TTL -- qs-02 PY-4 AC8 / decision P3): the ENTIRE check+fetch+store
+        sequence for any key is serialized under a single global lock so
+        concurrent resolutions of the SAME ``(sdk_key, experience_id)``
+        collapse into exactly one real fetch. A failed fetch (raised
+        :class:`~convert_sdk.errors.ConfigLoadError`) is never memoized, so
+        the next call retries a real fetch (JS parity: a transient error must
+        not strand a QA/preview session for the full TTL window).
+
+        Never touches the DataStore -- this cache is purely in-memory and
+        process-wide, independent of any per-visitor persistence boundary.
+
+        On a real (non-memoized) fetch, expired entries across ALL keys are
+        swept from the memo before the new entry is stored (code-review
+        finding R1, Ruby sibling parity: ruby-sdk#41). Without this sweep the
+        dict would only ever OVERWRITE a same-key entry and would otherwise
+        grow unbounded with the number of distinct ``(sdk_key, experience_id)``
+        pairs previewed over the process lifetime -- experience_ids originate
+        from external, attacker-influenceable preview link params. The sweep
+        runs inside the SAME critical section as the check+fetch+store
+        sequence, so it adds no new lock and cannot introduce a double-fetch
+        race (AC8 is unaffected: it only ever removes entries already past
+        their TTL, never a fresh one).
+        """
+        cache_key = f"{config.sdk_key}:{experience_id}"
+        with _CONFIG_BY_EXPERIENCE_LOCK:
+            cached = _CONFIG_BY_EXPERIENCE_CACHE.get(cache_key)
+            if cached is not None:
+                body, fetched_at = cached
+                if _now() - fetched_at < _CONFIG_BY_EXPERIENCE_TTL_SECONDS:
+                    return body
+
+            route = self._build_experience_route(config, experience_id)
+            body = self._get_config_json(route)
+            now = _now()
+            expired_keys = [
+                key
+                for key, (_, fetched_at) in _CONFIG_BY_EXPERIENCE_CACHE.items()
+                if now - fetched_at >= _CONFIG_BY_EXPERIENCE_TTL_SECONDS
+            ]
+            for key in expired_keys:
+                del _CONFIG_BY_EXPERIENCE_CACHE[key]
+            _CONFIG_BY_EXPERIENCE_CACHE[cache_key] = (body, now)
+            return body
 
     # --- tracking delivery (metrics host) ------------------------------------
 

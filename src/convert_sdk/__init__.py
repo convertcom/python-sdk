@@ -43,6 +43,7 @@ from convert_sdk.errors import (
 )
 from convert_sdk.events import LifecycleEvent
 from convert_sdk.ports.storage import DataStore
+from convert_sdk.preview import parse_preview_param
 from convert_sdk.version import __version__
 
 __all__ = [  # noqa: RUF022 - grouped by story for readability, not alphabetized
@@ -88,4 +89,8 @@ __all__ = [  # noqa: RUF022 - grouped by story for readability, not alphabetized
     # user-visible SDKConfig.data_store default per the PRD Config Option Matrix).
     "DataStore",
     "InMemoryDataStore",
+    # qs-02 PY-2: pure experiment-preview link-param parser (AC9). The
+    # application parses the raw ``convert_preview=`` value with this helper
+    # before handing the pair to ``Context.set_preview`` (PY-5).
+    "parse_preview_param",
 ]
