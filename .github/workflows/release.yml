@@ -61,7 +61,7 @@ jobs:
         run: yarn install --immutable
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           version: "0.10.11"
           enable-cache: true
@@ -125,7 +125,7 @@ jobs:
       # Trusted Publisher must be configured on pypi.org for this repo +
       # workflow + environment (one-time manual step — see RELEASE.md).
       # No password/token input: the action exchanges the OIDC token.
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
         with:
           packages-dir: dist
 
