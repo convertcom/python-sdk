@@ -39,8 +39,24 @@ All tooling is configured in `pyproject.toml`. Key settings:
 | coverage | `source = ["convert_sdk"]`; `fail_under = 85` |
 | towncrier | fragments under `changes/`; compiled only at release time |
 
-pytest is pinned to `>=8.4,<8.5` because pytest 9.x dropped Python 3.9 support,
-which is the lower bound of the CI matrix.
+pytest is split on an environment marker rather than pinned to one line:
+
+```toml
+"pytest>=9.0.3,<10; python_version >= '3.10'",
+"pytest>=8.4,<8.5;  python_version < '3.10'",
+```
+
+GHSA-6w46-j5rx-g56g / CVE-2025-71176 (pytest's insecure temporary directory —
+`/tmp/pytest-of-{user}` is predictable) affects every pytest release before
+9.0.3, and pytest 9 requires Python >=3.10. Because the matrix floor is 3.9, no
+single specifier is both patched and installable across it, so the marker takes
+the patched line wherever it can run and falls back to the last 3.9-compatible
+line on the bottom cell only.
+
+**Do not collapse these two lines into `pytest>=8.4,<8.5`** — that reintroduces
+the CVE on every cell. Collapse them into `pytest>=9.0.3` instead, and only once
+the SDK's own `requires-python` floor moves to 3.10. `pyproject.toml` carries the
+same instruction next to the specifiers.
 
 ## CI matrix
 
