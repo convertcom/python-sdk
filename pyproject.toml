@@ -156,9 +156,25 @@ exclude_lines = [
 
 [dependency-groups]
 dev = [
-    # pytest pinned to the 8.4.x line: pytest 9 drops Python 3.9 support, which
-    # would break the lower edge of the CI matrix (architecture decision; qs-02).
-    "pytest>=8.4,<8.5",
+    # pytest is split on an environment marker, not pinned to one line.
+    #
+    # GHSA-6w46-j5rx-g56g / CVE-2025-71176 (insecure temporary directory —
+    # `/tmp/pytest-of-{user}` is predictable, so a local user can pre-create or
+    # symlink it) affects EVERY pytest release up to 9.0.2 and is fixed only in
+    # 9.0.3. pytest 9 requires Python >=3.10, and NFR22 mandates the full
+    # CPython 3.9-3.13 matrix, so no single specifier is both patched and
+    # installable across the matrix.
+    #
+    # The marker takes the patched line everywhere it can run (3.10-3.13) and
+    # falls back to the last 3.9-compatible line on the bottom cell only. The
+    # 3.9 cell therefore carries a MODERATE, local-vector, dev-only advisory
+    # that no upstream release can clear; pytest never ships (the wheel is
+    # packages = ["src/convert_sdk"] and httpx is the only runtime dependency),
+    # so this is bounded to the runner executing the suite. Collapse the two
+    # lines into "pytest>=9.0.3" the moment the SDK's own requires-python
+    # floor moves to 3.10.
+    "pytest>=9.0.3,<10; python_version >= '3.10'",
+    "pytest>=8.4,<8.5; python_version < '3.10'",
     # RESPX route-level HTTPX mocking for transport/config-fetch tests
     # (qs-06 integration-test-harness pattern; no socket-level patching).
     "respx>=0.21,<1.0",
