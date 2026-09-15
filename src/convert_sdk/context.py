@@ -769,6 +769,7 @@ class Context:
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         experience_keys: Optional[Sequence[str]] = None,
+        type_casting: bool = True,
     ) -> Optional[FeatureResult]:
         """Resolve a single feature by key for this visitor.
 
@@ -790,6 +791,9 @@ class Context:
                 (the default), an empty sequence, and a bare ``str`` all mean
                 "every experience". An experience reachable only through an
                 excluded key is omitted, never returned ``None``/``DISABLED``.
+            type_casting: When truthy (the default), variables are cast by
+                declared type. Falsy returns every variable exactly as the
+                snapshot stores it. Changes no decision (D-6).
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -801,6 +805,7 @@ class Context:
             location_attributes=location,
             sticky_bucketing=self._state.bucketing,
             experience_keys=experience_keys,
+            type_casting=type_casting,
         )
 
     def run_features(
@@ -809,6 +814,7 @@ class Context:
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
         experience_keys: Optional[Sequence[str]] = None,
+        type_casting: bool = True,
     ) -> List[FeatureResult]:
         """Resolve all applicable features for this visitor.
 
@@ -820,6 +826,8 @@ class Context:
         Args:
             experience_keys: Optional filter (CAP-1), forwarded verbatim to
                 each per-feature resolution. See :meth:`run_feature`.
+            type_casting: Forwarded verbatim to every resolved feature. See
+                :meth:`run_feature`.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -830,6 +838,7 @@ class Context:
             location_attributes=location,
             sticky_bucketing=self._state.bucketing,
             experience_keys=experience_keys,
+            type_casting=type_casting,
         )
 
     # --- conversion tracking -----------------------------------------------

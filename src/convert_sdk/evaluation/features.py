@@ -97,8 +97,15 @@ def _variable_types(feature: Mapping[str, Any]) -> Dict[str, str]:
 
 
 def _cast_variables(
-    raw_variables: Mapping[str, Any], feature: Mapping[str, Any]
+    raw_variables: Mapping[str, Any], feature: Mapping[str, Any], type_casting: bool = True
 ) -> Dict[str, Any]:
+    """Cast ``raw_variables`` by declared type, or pass them through verbatim.
+
+    ``type_casting`` gates casting by plain truthiness (CAP-2, D-6): ``False``
+    returns every value exactly as the snapshot stores it, no conversion.
+    """
+    if not type_casting:
+        return dict(raw_variables or {})
     types = _variable_types(feature)
     return {
         str(key): _cast_value(value, types.get(str(key)))
@@ -142,6 +149,7 @@ def resolve_feature(
     location_attributes: Optional[Mapping[str, Any]] = None,
     sticky_bucketing: Optional[Mapping[str, str]] = None,
     experience_keys: Optional[Sequence[str]] = None,
+    type_casting: bool = True,
 ) -> Optional[FeatureResult]:
     """Resolve a single feature by key for ``visitor_id``.
 
@@ -162,6 +170,10 @@ def resolve_feature(
     considered, by set membership against the config's own experience order --
     the caller's key order never decides precedence. ``None``, absent, an
     empty sequence, or a bare ``str`` all mean "every experience" (D-4).
+
+    ``type_casting`` (CAP-2) gates variable casting by plain truthiness.
+    ``True`` (default) casts by declared type; falsy returns stored values
+    verbatim. Changes no decision -- only ``variables`` differs.
     """
     if not visitor_id:
         return None
@@ -198,7 +210,7 @@ def resolve_feature(
         change = _feature_change_for(result.variation, feature_id)
         if change is None:
             continue
-        variables = _cast_variables(change.get("variables_data") or {}, feature)
+        variables = _cast_variables(change.get("variables_data") or {}, feature, type_casting)
         return FeatureResult(
             feature_key=str(feature.get("key", feature_key)),
             feature_id=feature_id,
@@ -219,6 +231,7 @@ def resolve_features(
     location_attributes: Optional[Mapping[str, Any]] = None,
     sticky_bucketing: Optional[Mapping[str, str]] = None,
     experience_keys: Optional[Sequence[str]] = None,
+    type_casting: bool = True,
 ) -> List[FeatureResult]:
     """Resolve all applicable features for ``visitor_id``.
 
@@ -230,6 +243,7 @@ def resolve_features(
     :func:`resolve_feature` call, read-only. ``experience_keys`` (CAP-1) is
     forwarded verbatim as well; a feature reachable only through an excluded
     experience is omitted from the returned list, never padded ``DISABLED``.
+    ``type_casting`` (CAP-2) is forwarded verbatim to every resolved feature.
     """
     results: List[FeatureResult] = []
     for feature in snapshot.features:
@@ -244,6 +258,7 @@ def resolve_features(
             location_attributes=location_attributes,
             sticky_bucketing=sticky_bucketing,
             experience_keys=experience_keys,
+            type_casting=type_casting,
         )
         if result is not None:
             results.append(result)
