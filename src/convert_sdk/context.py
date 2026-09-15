@@ -773,10 +773,16 @@ class Context:
     ) -> Optional[FeatureResult]:
         """Resolve a single feature by key for this visitor.
 
-        Resolves locally from the visitor's selected variation's
-        ``fullStackFeature`` change, casting variables by declared type.
-        Returns a typed :class:`~convert_sdk.domain.results.FeatureResult`,
-        or ``None`` for any normal miss. Never raises; no network I/O.
+        Resolves the feature locally from the visitor's selected variation —
+        reading the variation's ``fullStackFeature`` change and casting the
+        feature's variables by their declared types. Request-time ``attributes``
+        / ``location_attributes`` overlay the stored context state for this call
+        only. Returns a typed
+        :class:`~convert_sdk.domain.results.FeatureResult` when the feature is
+        declared and the visitor buckets into a variation carrying its change,
+        or ``None`` for any normal miss (undeclared/unavailable feature,
+        unqualified visitor). Never raises for normal evaluation outcomes and
+        performs no network I/O.
 
         Args:
             feature_key: The feature key to resolve.

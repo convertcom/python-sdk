@@ -105,7 +105,7 @@ def _cast_variables(
     returns every value exactly as the snapshot stores it, no conversion.
     """
     if not type_casting:
-        return dict(raw_variables or {})
+        return {str(key): value for key, value in (raw_variables or {}).items()}
     types = _variable_types(feature)
     return {
         str(key): _cast_value(value, types.get(str(key)))

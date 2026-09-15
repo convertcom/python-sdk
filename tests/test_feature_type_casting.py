@@ -266,3 +266,46 @@ def test_type_casting_composes_with_experience_keys_filter():
     assert result is not None
     assert result.experience_key == "secondary-typed-experiment"
     assert result.variables["enabled"] == "enabled"
+
+
+# --- boundary 6: variables_data keys always normalize to str, on or off ----
+
+# A non-str `variables_data` key must not survive into `result.variables`
+# verbatim, cast on or off (CAP-2's `Dict[str, Any]` contract).
+NON_STR_KEY_FEATURE_ID = "f-non-str-key"
+NON_STR_KEY_FEATURE_KEY = "non-str-key-feature"
+
+NON_STR_KEY_CONFIG = _config(
+    experiences=[
+        _experience(
+            "e-non-str-key",
+            "non-str-key-experiment",
+            "v-non-str-key",
+            "non-str-key-variant",
+            _change(
+                NON_STR_KEY_FEATURE_ID,
+                {5: "int-keyed-value", "enabled": "on"},
+                "c-non-str-key",
+            ),
+        )
+    ],
+    features=[
+        _feature(
+            NON_STR_KEY_FEATURE_ID,
+            NON_STR_KEY_FEATURE_KEY,
+            [{"key": "enabled", "type": "boolean"}],
+        )
+    ],
+)
+
+
+def test_variables_keys_are_always_str_regardless_of_type_casting():
+    ctx = _ctx(NON_STR_KEY_CONFIG, visitor_id="non-str-key-visitor")
+
+    cast_on = ctx.run_feature(NON_STR_KEY_FEATURE_KEY)
+    assert cast_on is not None
+    assert all(isinstance(key, str) for key in cast_on.variables)
+
+    cast_off = ctx.run_feature(NON_STR_KEY_FEATURE_KEY, type_casting=False)
+    assert cast_off is not None
+    assert all(isinstance(key, str) for key in cast_off.variables)
