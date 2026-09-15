@@ -14,6 +14,7 @@ documented disposition fails here first.
 from __future__ import annotations
 
 import inspect
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -156,6 +157,17 @@ def test_surface_signature_matches_table_disposition(surface):
     method = getattr(Context, surface)
     actual = set(inspect.signature(method).parameters)
     assert actual == _expected_params_for(surface)
+
+
+@pytest.mark.parametrize("name", ["run_feature", "run_features", "diagnose_feature"])
+def test_docstring_args_match_signature(name):
+    """Every keyword param is documented, and no documented param is stale."""
+    method = getattr(Context, name)
+    sig_params = set(inspect.signature(method).parameters) - {"self"}
+    entries = method.__doc__.split("Args:\n", 1)[1].split("\n\n", 1)[0]
+    indent = len(entries) - len(entries.lstrip(" "))
+    documented = set(re.findall(rf"^ {{{indent}}}(\w+):", entries, re.MULTILINE))
+    assert documented == sig_params
 
 
 # ---------------------------------------------------------------------------

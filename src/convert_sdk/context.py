@@ -773,27 +773,25 @@ class Context:
     ) -> Optional[FeatureResult]:
         """Resolve a single feature by key for this visitor.
 
-        Resolves the feature locally from the visitor's selected variation —
-        reading the variation's ``fullStackFeature`` change and casting the
-        feature's variables by their declared types. Request-time ``attributes``
-        / ``location_attributes`` overlay the stored context state for this call
-        only. Returns a typed
-        :class:`~convert_sdk.domain.results.FeatureResult` when the feature is
-        declared and the visitor buckets into a variation carrying its change,
-        or ``None`` for any normal miss (undeclared/unavailable/disabled feature,
-        unqualified visitor). Never raises for normal evaluation outcomes and
-        performs no network I/O.
+        Resolves locally from the visitor's selected variation's
+        ``fullStackFeature`` change, casting variables by declared type.
+        Returns a typed :class:`~convert_sdk.domain.results.FeatureResult`,
+        or ``None`` for any normal miss. Never raises; no network I/O.
 
         Args:
-            experience_keys: Optional filter (CAP-1) narrowing which declaring
-                experiences are considered, and therefore which decides
-                precedence when more than one carries this feature. ``None``
-                (the default), an empty sequence, and a bare ``str`` all mean
-                "every experience". An experience reachable only through an
-                excluded key is omitted, never returned ``None``/``DISABLED``.
-            type_casting: When truthy (the default), variables are cast by
-                declared type. Falsy returns every variable exactly as the
-                snapshot stores it. Changes no decision (D-6).
+            feature_key: The feature key to resolve.
+            attributes: Optional per-call visitor attribute overlay.
+            location_attributes: Optional per-call location overlay.
+            experience_keys: Optional filter (CAP-1). ``None``/``[]`` mean
+                every experience; an unknown key is skipped, all-unknown
+                omits the feature (never an error). Caller order is
+                ignored — evaluation follows config order, and the first
+                experience that resolves wins.
+            type_casting: When truthy (default), casts variables by
+                declared type; falsy skips ONLY the cast — same variation
+                and feature, every other field identical. Uncast is lossy,
+                not more accurate (e.g. a ``json`` variable returns as its
+                stored string).
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -824,10 +822,14 @@ class Context:
         I/O.
 
         Args:
+            attributes: Optional per-call visitor attribute overlay (ephemeral).
+            location_attributes: Optional per-call location attribute overlay
+                (ephemeral).
             experience_keys: Optional filter (CAP-1), forwarded verbatim to
-                each per-feature resolution. See :meth:`run_feature`.
-            type_casting: Forwarded verbatim to every resolved feature. See
-                :meth:`run_feature`.
+                each per-feature resolution — same empty-list/unknown-key
+                behavior. See :meth:`run_feature`.
+            type_casting: Forwarded verbatim to every resolved feature — same
+                skip-only-the-cast behavior. See :meth:`run_feature`.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -1132,8 +1134,18 @@ class Context:
         the visitor's selected variation(s) carry no change for it, including
         when the reason is the caller's own ``experience_keys`` filter), or
         ``RESOLVED``. Additive to :meth:`run_feature`, and CAP-3: agrees with it
-        under the identical filter. Does not accept ``type_casting`` — this
-        diagnostic carries no variable map for that flag to act on.
+        under the identical filter.
+
+        Args:
+            feature_key: The feature key to diagnose.
+            attributes: Optional per-call visitor attribute overlay (ephemeral).
+            location_attributes: Optional per-call location attribute overlay
+                (ephemeral).
+            experience_keys: Optional filter (CAP-1); same empty-list and
+                unknown-key semantics as :meth:`run_feature`.
+
+        Does not accept ``type_casting`` (D-7): the diagnostic returns a reason
+        and no variable map, so the flag has no decision left to change.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
