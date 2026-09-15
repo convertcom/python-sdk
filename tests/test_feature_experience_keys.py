@@ -262,3 +262,22 @@ def test_diagnose_feature_agrees_with_run_feature_under_the_identical_filter(
     assert diagnosis.resolved is resolved
     if not resolved:
         assert diagnosis.reason is DiagnosticReason.FEATURE_NOT_IN_SELECTED_VARIATIONS
+
+
+# --- one-shot iterables must not be exhausted before the second feature -----
+
+
+def test_run_features_gives_identical_results_for_list_generator_and_map():
+    # ``resolve_features`` must materialize a one-shot iterable once, before
+    # its per-feature loop, or feature #2+ sees it already exhausted.
+    ctx = _ctx(DISTINCT_FEATURES_CONFIG)
+    keys_source = ["checkout-experiment"]
+
+    from_list = {r.feature_key for r in ctx.run_features(experience_keys=list(keys_source))}
+    from_generator = {
+        r.feature_key
+        for r in ctx.run_features(experience_keys=(k for k in keys_source))
+    }
+    from_map = {r.feature_key for r in ctx.run_features(experience_keys=map(str, keys_source))}
+
+    assert from_list == from_generator == from_map == {"feature-a"}

@@ -245,6 +245,9 @@ def resolve_features(
     experience is omitted from the returned list, never padded ``DISABLED``.
     ``type_casting`` (CAP-2) is forwarded verbatim to every resolved feature.
     """
+    if experience_keys is not None and not isinstance(experience_keys, str):
+        experience_keys = tuple(experience_keys)
+
     results: List[FeatureResult] = []
     for feature in snapshot.features:
         key = feature.get("key")
