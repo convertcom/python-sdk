@@ -240,9 +240,9 @@ def resolve_features(
     ``None`` entries). Evaluation stays local to the snapshot — no network I/O.
 
     ``sticky_bucketing`` (qs-03 PY-5) is forwarded verbatim to each per-feature
-    :func:`resolve_feature` call, read-only. ``experience_keys`` (CAP-1) is
-    forwarded verbatim as well; a feature reachable only through an excluded
-    experience is omitted from the returned list, never padded ``DISABLED``.
+    :func:`resolve_feature` call, read-only. ``experience_keys`` (CAP-1) is materialised
+    once, then applied identically to every feature; a feature reachable only through an
+    excluded experience is omitted from the returned list, never padded ``DISABLED``.
     ``type_casting`` (CAP-2) is forwarded verbatim to every resolved feature.
     """
     if experience_keys is not None and not isinstance(experience_keys, str):

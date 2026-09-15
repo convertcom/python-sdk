@@ -831,8 +831,8 @@ class Context:
             attributes: Optional per-call visitor attribute overlay (ephemeral).
             location_attributes: Optional per-call location attribute overlay
                 (ephemeral).
-            experience_keys: Optional filter (CAP-1), forwarded verbatim to
-                each per-feature resolution — same empty-list/unknown-key
+            experience_keys: Optional filter (CAP-1), applied to each
+                per-feature resolution — same empty-list/unknown-key
                 behavior. See :meth:`run_feature`.
             type_casting: Forwarded verbatim to every resolved feature — same
                 skip-only-the-cast behavior. See :meth:`run_feature`.
