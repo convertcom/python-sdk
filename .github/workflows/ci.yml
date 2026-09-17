@@ -175,6 +175,11 @@ jobs:
         run: uv python install 3.13
       - name: Build distributions
         run: uv build
+      # Keep this twine version equal to the one release.yml's pinned
+      # pypa/gh-action-pypi-publish ships, or publish can reject a build CI
+      # accepted. Both move together.
+      - name: twine check (same twine the publish action runs)
+        run: uv run --with twine==7.0.0 twine check dist/*
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
         with:
