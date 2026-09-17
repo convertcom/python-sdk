@@ -30,7 +30,7 @@ I/O.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
 from convert_sdk.domain.results import FeatureResult, FeatureStatus
 from convert_sdk.evaluation.experiences import select_experience
@@ -97,13 +97,36 @@ def _variable_types(feature: Mapping[str, Any]) -> Dict[str, str]:
 
 
 def _cast_variables(
-    raw_variables: Mapping[str, Any], feature: Mapping[str, Any]
+    raw_variables: Mapping[str, Any], feature: Mapping[str, Any], type_casting: bool = True
 ) -> Dict[str, Any]:
+    """Cast ``raw_variables`` by declared type, or pass them through verbatim.
+
+    ``type_casting`` gates casting by plain truthiness (CAP-2, D-6): ``False``
+    returns every value exactly as the snapshot stores it, no conversion.
+    """
+    if not type_casting:
+        return {str(key): value for key, value in (raw_variables or {}).items()}
     types = _variable_types(feature)
     return {
         str(key): _cast_value(value, types.get(str(key)))
         for key, value in (raw_variables or {}).items()
     }
+
+
+def _normalize_experience_keys(
+    experience_keys: Optional[Sequence[str]],
+) -> Optional[Set[str]]:
+    """Normalize the ``experience_keys`` filter to an allow-set, or ``None``.
+
+    ``None`` means "consider every experience" (CAP-1 / D-4): absent, an empty
+    sequence, and a bare ``str`` (guarded explicitly -- a ``str`` satisfies
+    ``Sequence[str]`` and would otherwise be iterated character-by-character)
+    all normalize to ``None``. A non-empty sequence dedupes to a set.
+    """
+    if experience_keys is None or isinstance(experience_keys, str):
+        return None
+    keys = {str(key) for key in experience_keys}
+    return keys or None
 
 
 def _experiences_declaring_feature(snapshot: Any, feature_id: str) -> List[Mapping[str, Any]]:
@@ -125,6 +148,8 @@ def resolve_feature(
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     location_attributes: Optional[Mapping[str, Any]] = None,
     sticky_bucketing: Optional[Mapping[str, str]] = None,
+    experience_keys: Optional[Sequence[str]] = None,
+    type_casting: bool = True,
 ) -> Optional[FeatureResult]:
     """Resolve a single feature by key for ``visitor_id``.
 
@@ -140,6 +165,15 @@ def resolve_feature(
     feature resolution stays consistent with an already-served/persisted
     bucketing decision (the shared sticky-read chokepoint, JS parity) instead
     of re-hashing. This function only reads the map; it persists nothing.
+
+    ``experience_keys`` (CAP-1) narrows which declaring experiences are
+    considered, by set membership against the config's own experience order --
+    the caller's key order never decides precedence. ``None``, absent, an
+    empty sequence, or a bare ``str`` all mean "every experience" (D-4).
+
+    ``type_casting`` (CAP-2) gates variable casting by plain truthiness.
+    ``True`` (default) casts by declared type; falsy returns stored values
+    verbatim. Changes no decision -- only ``variables`` differs.
     """
     if not visitor_id:
         return None
@@ -153,9 +187,15 @@ def resolve_feature(
         return None
     feature_id = str(feature_id)
 
+    allowed_experience_keys = _normalize_experience_keys(experience_keys)
+
     for experience in _experiences_declaring_feature(snapshot, feature_id):
         experience_key = experience.get("key")
         if experience_key is None:
+            continue
+        if allowed_experience_keys is not None and str(experience_key) not in (
+            allowed_experience_keys
+        ):
             continue
         result = select_experience(
             str(experience_key),
@@ -170,7 +210,7 @@ def resolve_feature(
         change = _feature_change_for(result.variation, feature_id)
         if change is None:
             continue
-        variables = _cast_variables(change.get("variables_data") or {}, feature)
+        variables = _cast_variables(change.get("variables_data") or {}, feature, type_casting)
         return FeatureResult(
             feature_key=str(feature.get("key", feature_key)),
             feature_id=feature_id,
@@ -190,6 +230,8 @@ def resolve_features(
     visitor_attributes: Optional[Mapping[str, Any]] = None,
     location_attributes: Optional[Mapping[str, Any]] = None,
     sticky_bucketing: Optional[Mapping[str, str]] = None,
+    experience_keys: Optional[Sequence[str]] = None,
+    type_casting: bool = True,
 ) -> List[FeatureResult]:
     """Resolve all applicable features for ``visitor_id``.
 
@@ -198,8 +240,14 @@ def resolve_features(
     ``None`` entries). Evaluation stays local to the snapshot — no network I/O.
 
     ``sticky_bucketing`` (qs-03 PY-5) is forwarded verbatim to each per-feature
-    :func:`resolve_feature` call, read-only.
+    :func:`resolve_feature` call, read-only. ``experience_keys`` (CAP-1) is materialised
+    once, then applied identically to every feature; a feature reachable only through an
+    excluded experience is omitted from the returned list, never padded ``DISABLED``.
+    ``type_casting`` (CAP-2) is forwarded verbatim to every resolved feature.
     """
+    if experience_keys is not None and not isinstance(experience_keys, str):
+        experience_keys = tuple(experience_keys)
+
     results: List[FeatureResult] = []
     for feature in snapshot.features:
         key = feature.get("key")
@@ -212,6 +260,8 @@ def resolve_features(
             visitor_attributes=visitor_attributes,
             location_attributes=location_attributes,
             sticky_bucketing=sticky_bucketing,
+            experience_keys=experience_keys,
+            type_casting=type_casting,
         )
         if result is not None:
             results.append(result)

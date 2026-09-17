@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, TypeVar
 
 from convert_sdk._internal.redaction import SafeContext, fingerprint_visitor
 from convert_sdk.domain.context_state import ContextState
@@ -768,6 +768,8 @@ class Context:
         *,
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
+        experience_keys: Optional[Sequence[str]] = None,
+        type_casting: bool = True,
     ) -> Optional[FeatureResult]:
         """Resolve a single feature by key for this visitor.
 
@@ -778,9 +780,24 @@ class Context:
         only. Returns a typed
         :class:`~convert_sdk.domain.results.FeatureResult` when the feature is
         declared and the visitor buckets into a variation carrying its change,
-        or ``None`` for any normal miss (undeclared/unavailable/disabled feature,
+        or ``None`` for any normal miss (undeclared/unavailable feature,
         unqualified visitor). Never raises for normal evaluation outcomes and
         performs no network I/O.
+
+        Args:
+            feature_key: The feature key to resolve.
+            attributes: Optional per-call visitor attribute overlay.
+            location_attributes: Optional per-call location overlay.
+            experience_keys: Optional filter (CAP-1). ``None``/``[]`` mean
+                every experience; an unknown key is skipped, all-unknown
+                omits the feature (never an error). Caller order is
+                ignored — evaluation follows config order, and the first
+                experience that resolves wins.
+            type_casting: When truthy (default), casts variables by
+                declared type; falsy skips ONLY the cast — same variation
+                and feature, every other field identical. Uncast is lossy,
+                not more accurate (e.g. a ``json`` variable returns as its
+                stored string).
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -791,6 +808,8 @@ class Context:
             visitor_attributes=visitor_attributes,
             location_attributes=location,
             sticky_bucketing=self._state.bucketing,
+            experience_keys=experience_keys,
+            type_casting=type_casting,
         )
 
     def run_features(
@@ -798,6 +817,8 @@ class Context:
         *,
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
+        experience_keys: Optional[Sequence[str]] = None,
+        type_casting: bool = True,
     ) -> List[FeatureResult]:
         """Resolve all applicable features for this visitor.
 
@@ -805,6 +826,16 @@ class Context:
         enabled state; features the visitor does not bucket into are omitted (no
         ``None`` entries). Evaluation stays local to the snapshot — no network
         I/O.
+
+        Args:
+            attributes: Optional per-call visitor attribute overlay (ephemeral).
+            location_attributes: Optional per-call location attribute overlay
+                (ephemeral).
+            experience_keys: Optional filter (CAP-1), applied to each
+                per-feature resolution — same empty-list/unknown-key
+                behavior. See :meth:`run_feature`.
+            type_casting: Forwarded verbatim to every resolved feature — same
+                skip-only-the-cast behavior. See :meth:`run_feature`.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -814,6 +845,8 @@ class Context:
             visitor_attributes=visitor_attributes,
             location_attributes=location,
             sticky_bucketing=self._state.bucketing,
+            experience_keys=experience_keys,
+            type_casting=type_casting,
         )
 
     # --- conversion tracking -----------------------------------------------
@@ -1097,14 +1130,28 @@ class Context:
         *,
         attributes: Optional[Mapping[str, Any]] = None,
         location_attributes: Optional[Mapping[str, Any]] = None,
+        experience_keys: Optional[Sequence[str]] = None,
     ) -> FeatureDiagnostic:
         """Diagnose why a feature did or did not resolve for this visitor (FR50).
 
         Returns a typed :class:`~convert_sdk.domain.results.FeatureDiagnostic`
         naming the closed reason — ``FEATURE_NOT_FOUND`` (no feature matches the
         key), ``FEATURE_NOT_IN_SELECTED_VARIATIONS`` (the feature is declared but
-        the visitor's selected variation(s) carry no change for it), or
-        ``RESOLVED``. Additive to :meth:`run_feature`.
+        the visitor's selected variation(s) carry no change for it, including
+        when the reason is the caller's own ``experience_keys`` filter), or
+        ``RESOLVED``. Additive to :meth:`run_feature`, and CAP-3: agrees with it
+        under the identical filter.
+
+        Args:
+            feature_key: The feature key to diagnose.
+            attributes: Optional per-call visitor attribute overlay (ephemeral).
+            location_attributes: Optional per-call location attribute overlay
+                (ephemeral).
+            experience_keys: Optional filter (CAP-1); same empty-list and
+                unknown-key semantics as :meth:`run_feature`.
+
+        Does not accept ``type_casting`` (D-7): the diagnostic returns a reason
+        and no variable map, so the flag has no decision left to change.
         """
         visitor_attributes = self._state.with_overlay(attributes)
         location = self._merge(self._location_attributes, location_attributes)
@@ -1124,6 +1171,7 @@ class Context:
             visitor_attributes=visitor_attributes,
             location_attributes=location,
             sticky_bucketing=self._state.bucketing,
+            experience_keys=experience_keys,
         )
         if result is not None:
             return self._diagnose(
