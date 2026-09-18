@@ -1,0 +1,17 @@
+version: 2
+
+# GitHub Actions only. Python dependencies are governed by pyproject's own
+# bounds and the bounds-check matrix, which Dependabot cannot reason about.
+#
+# pypa/gh-action-pypi-publish v1.14.2 shipped 13 days before hatchling 1.32.0
+# raised the default core-metadata version to 2.5. A weekly bump would have
+# landed the new uploader inside that window. Dependabot also writes the
+# peeled commit sha, not the annotated tag object.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci

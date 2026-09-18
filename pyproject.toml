@@ -23,7 +23,7 @@ Repository = "https://github.com/convertcom/python-sdk"
 Changelog = "https://github.com/convertcom/python-sdk/releases"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling<2"]
 build-backend = "hatchling.build"
 
 # Single-source the version from src/convert_sdk/version.py (qs-01). The
