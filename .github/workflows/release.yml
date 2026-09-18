@@ -41,7 +41,7 @@ jobs:
       released: ${{ steps.sr.outputs.released }}
       version:  ${{ steps.sr.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # semantic-release analyzes all commits since the last tag; the
           # default shallow clone (depth 1) would blind it.
@@ -138,7 +138,7 @@ jobs:
     permissions:
       contents: write   # push vX.Y.Z tag + create the GitHub Release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: true
