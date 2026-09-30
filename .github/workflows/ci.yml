@@ -181,7 +181,7 @@ jobs:
       - name: twine check (same twine the publish action runs)
         run: uv run --with twine==7.0.0 twine check dist/*
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/*
