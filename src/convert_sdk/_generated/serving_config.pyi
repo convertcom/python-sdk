@@ -142,6 +142,7 @@ class ConfigGoal(TypedDict, total=False):
     id: Optional[str]
     name: Optional[str]
     key: Optional[str]
+    is_guardrail: Optional[bool]
     type: Optional[Literal["dom_interaction", "scroll_percentage", "revenue", "advanced", "visits_page", "code_trigger", "ga_import", "submits_form", "clicks_link", "clicks_element"]]
     rules: Optional[Any]
 
