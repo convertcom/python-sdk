@@ -101,6 +101,10 @@ class ConfigExperienceSettings(TypedDict, total=False):
     split_url_settings: Optional[ConfigExperienceSettingsSplitUrlSettings]
     matching_options: Optional[ConfigExperienceSettingsMatchingOptions]
 
+class ConfigExperienceVisitorInsights(TypedDict, total=False):
+    heatmap_enabled: Optional[bool]
+    signals_enabled: Optional[bool]
+
 class ConfigExperience(TypedDict, total=False):
     id: Optional[str]
     name: Optional[str]
@@ -120,6 +124,7 @@ class ConfigExperience(TypedDict, total=False):
     environments: Optional[List[str]]
     environment: Optional[str]
     settings: Optional[ConfigExperienceSettings]
+    visitor_insights: Optional[ConfigExperienceVisitorInsights]
 
 class ExperienceVariation(TypedDict, total=False):
     id: Optional[str]
@@ -142,6 +147,7 @@ class ConfigGoal(TypedDict, total=False):
     id: Optional[str]
     name: Optional[str]
     key: Optional[str]
+    is_guardrail: Optional[bool]
     type: Optional[Literal["dom_interaction", "scroll_percentage", "revenue", "advanced", "visits_page", "code_trigger", "ga_import", "submits_form", "clicks_link", "clicks_element"]]
     rules: Optional[Any]
 
